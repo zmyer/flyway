@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,6 @@ import org.flywaydb.core.api.MigrationVersion;
 import org.flywaydb.core.api.logging.Log;
 import org.flywaydb.core.api.logging.LogFactory;
 import org.flywaydb.core.api.resolver.ResolvedMigration;
-import org.flywaydb.core.internal.callback.NoopCallbackExecutor;
 import org.flywaydb.core.internal.database.base.Connection;
 import org.flywaydb.core.internal.database.base.Database;
 import org.flywaydb.core.internal.database.base.Table;
@@ -29,6 +28,8 @@ import org.flywaydb.core.internal.exception.FlywaySqlException;
 import org.flywaydb.core.internal.jdbc.JdbcTemplate;
 import org.flywaydb.core.internal.jdbc.RowMapper;
 import org.flywaydb.core.internal.jdbc.TransactionTemplate;
+import org.flywaydb.core.internal.sqlscript.SqlScriptExecutorFactory;
+import org.flywaydb.core.internal.sqlscript.SqlScriptFactory;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -42,6 +43,9 @@ import java.util.concurrent.Callable;
  */
 class JdbcTableSchemaHistory extends SchemaHistory {
     private static final Log LOG = LogFactory.getLog(JdbcTableSchemaHistory.class);
+
+    private final SqlScriptExecutorFactory sqlScriptExecutorFactory;
+    private final SqlScriptFactory sqlScriptFactory;
 
     /**
      * The database to use.
@@ -61,45 +65,19 @@ class JdbcTableSchemaHistory extends SchemaHistory {
     private final LinkedList<AppliedMigration> cache = new LinkedList<>();
 
     /**
-     * The user invoking Flyway, for audit purposes.
-     */
-    private final String installedBy;
-
-    /**
      * Creates a new instance of the schema history table support.
      *
-     * @param database    The database to use.
-     * @param table       The schema history table used by flyway.
-     * @param installedBy The user invoking Flyway, for audit purposes.
+     * @param database The database to use.
+     * @param table    The schema history table used by Flyway.
      */
-    JdbcTableSchemaHistory(Database database, Table table, String installedBy) {
-        this.table = determineTable(table);
+    JdbcTableSchemaHistory(SqlScriptExecutorFactory sqlScriptExecutorFactory, SqlScriptFactory sqlScriptFactory,
+                           Database database, Table table) {
+        this.sqlScriptExecutorFactory = sqlScriptExecutorFactory;
+        this.sqlScriptFactory = sqlScriptFactory;
+        this.table = table;
         this.database = database;
         this.connection = database.getMainConnection();
         this.jdbcTemplate = connection.getJdbcTemplate();
-        this.installedBy = installedBy;
-    }
-
-    /**
-     * Checks whether Flyway has to fallback to the old default table.
-     *
-     * @param table The currently configured table.
-     * @return The table to use.
-     */
-    private Table determineTable(Table table) {
-        // Ensure we are using the default table name before checking for the fallback table
-        if (table.getName().equals("flyway_schema_history") && !table.exists()) {
-            Table fallbackTable = table.getSchema().getTable("schema_version");
-            if (fallbackTable.exists()) {
-                LOG.warn("Could not find schema history table " + table + ", but found " + fallbackTable + " instead." +
-                        " You are seeing this message because Flyway changed its default for flyway.table in" +
-                        " version 5.0.0 to flyway_schema_history and you are still relying on the old default (schema_version)." +
-                        " Set flyway.table=schema_version in your configuration to fix this." +
-                        " This fallback mechanism will be removed in Flyway 6.0.0.");
-                table = fallbackTable;
-            }
-        }
-        return table;
     }
 
     @Override
@@ -115,37 +93,43 @@ class JdbcTableSchemaHistory extends SchemaHistory {
     }
 
     @Override
-    public void create() {
-        int retries = 0;
-        while (!exists()) {
-            if (retries == 0) {
-                LOG.info("Creating Schema History table: " + table);
-            }
-            try {
-                new TransactionTemplate(connection.getJdbcConnection(), true).execute(new Callable<Object>() {
-                    @Override
-                    public Object call() {
-                        database.createSqlScriptExecutor(jdbcTemplate
-
-
-
-                        ).execute(database.getCreateScript(table));
-                        LOG.debug("Created Schema History table: " + table);
-                        return null;
+    public void create(final boolean baseline) {
+        connection.lock(table, new Callable<Object>() {
+            @Override
+            public Object call() {
+                int retries = 0;
+                while (!exists()) {
+                    if (retries == 0) {
+                        LOG.info("Creating Schema History table " + table + (baseline ? " with baseline" : "") + " ...");
                     }
-                });
-            } catch (FlywayException e) {
-                if (++retries >= 10) {
-                    throw e;
+                    try {
+                        new TransactionTemplate(connection.getJdbcConnection(), true).execute(new Callable<Object>() {
+                            @Override
+                            public Object call() {
+                                sqlScriptExecutorFactory.createSqlScriptExecutor(connection.getJdbcConnection()
+
+
+
+                                ).execute(database.getCreateScript(sqlScriptFactory, table, baseline));
+                                LOG.debug("Created Schema History table " + table + (baseline ? " with baseline" : ""));
+                                return null;
+                            }
+                        });
+                    } catch (FlywayException e) {
+                        if (++retries >= 10) {
+                            throw e;
+                        }
+                        try {
+                            LOG.debug("Schema History table creation failed. Retrying in 1 sec ...");
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e1) {
+                            // Ignore
+                        }
+                    }
                 }
-                try {
-                    LOG.debug("Schema History table creation failed. Retrying in 1 sec ...");
-                    Thread.sleep(1000);
-                } catch (InterruptedException e1) {
-                    // Ignore
-                }
+                return null;
             }
-        }
+        });
     }
 
     @Override
@@ -161,7 +145,8 @@ class JdbcTableSchemaHistory extends SchemaHistory {
                                          int executionTime, boolean success) {
         connection.restoreOriginalState();
 
-        // Lock again for databases with no DDL transactions to prevent implicit commits from triggering deadlocks
+        // Lock again for databases with no clean DDL transactions like Oracle
+        // to prevent implicit commits from triggering deadlocks
         // in highly concurrent environments
         if (!database.supportsDdlTransactions()) {
             table.lock();
@@ -171,7 +156,7 @@ class JdbcTableSchemaHistory extends SchemaHistory {
             String versionStr = version == null ? null : version.toString();
 
             jdbcTemplate.update(database.getInsertStatement(table),
-                    installedRank, versionStr, description, type.name(), script, checksum, installedBy,
+                    installedRank, versionStr, description, type.name(), script, checksum, database.getInstalledBy(),
                     executionTime, success);
 
             LOG.debug("Schema History table " + table + " successfully updated to reflect changes");
@@ -193,7 +178,7 @@ class JdbcTableSchemaHistory extends SchemaHistory {
     private void refreshCache() {
         int maxCachedInstalledRank = cache.isEmpty() ? -1 : cache.getLast().getInstalledRank();
 
-        String query = database.getSelectStatement(table, maxCachedInstalledRank);
+        String query = database.getSelectStatement(table);
 
         try {
             cache.addAll(jdbcTemplate.query(query, new RowMapper<AppliedMigration>() {
@@ -203,11 +188,20 @@ class JdbcTableSchemaHistory extends SchemaHistory {
                         checksum = null;
                     }
 
+                    // Convert legacy types to their modern equivalent to avoid validation errors
+                    String type = rs.getString("type");
+                    if ("SPRING_JDBC".equals(type)) {
+                        type = "JDBC";
+                    }
+                    if ("UNDO_SPRING_JDBC".equals(type)) {
+                        type = "UNDO_JDBC";
+                    }
+
                     return new AppliedMigration(
                             rs.getInt("installed_rank"),
                             rs.getString("version") != null ? MigrationVersion.fromVersion(rs.getString("version")) : null,
                             rs.getString("description"),
-                            MigrationType.valueOf(rs.getString("type")),
+                            MigrationType.valueOf(type),
                             rs.getString("script"),
                             checksum,
                             rs.getTimestamp("installed_on"),
@@ -216,7 +210,7 @@ class JdbcTableSchemaHistory extends SchemaHistory {
                             rs.getBoolean("success")
                     );
                 }
-            }));
+            }, maxCachedInstalledRank));
         } catch (SQLException e) {
             throw new FlywaySqlException("Error while retrieving the list of applied migrations from Schema History table "
                     + table, e);
@@ -226,7 +220,7 @@ class JdbcTableSchemaHistory extends SchemaHistory {
     @Override
     public void removeFailedMigrations() {
         if (!exists()) {
-            LOG.info("Repair of failed migration in Schema History table " + table + " not necessary. No failed migration detected.");
+            LOG.info("Repair of failed migration in Schema History table " + table + " not necessary as table doesn't exist.");
             return;
         }
 

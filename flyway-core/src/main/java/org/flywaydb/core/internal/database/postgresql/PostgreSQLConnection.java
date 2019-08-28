@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package org.flywaydb.core.internal.database.postgresql;
 
 import org.flywaydb.core.api.FlywayException;
-import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.internal.database.base.Connection;
 import org.flywaydb.core.internal.database.base.Schema;
 import org.flywaydb.core.internal.database.base.Table;
@@ -32,17 +31,8 @@ import java.util.concurrent.Callable;
 public class PostgreSQLConnection extends Connection<PostgreSQLDatabase> {
     private final String originalRole;
 
-    PostgreSQLConnection(Configuration configuration, PostgreSQLDatabase database, java.sql.Connection connection
-            , boolean originalAutoCommit
-
-
-
-    ) {
-        super(configuration, database, connection, originalAutoCommit
-
-
-
-        );
+    PostgreSQLConnection(PostgreSQLDatabase database, java.sql.Connection connection) {
+        super(database, connection);
 
         try {
             originalRole = jdbcTemplate.queryForString("SELECT CURRENT_USER");

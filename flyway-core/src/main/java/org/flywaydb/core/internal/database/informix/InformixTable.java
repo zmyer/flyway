@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,5 +49,10 @@ public class InformixTable extends Table<InformixDatabase, InformixSchema> {
     @Override
     protected void doLock() throws SQLException {
         jdbcTemplate.update("lock table " + this + " in exclusive mode");
+    }
+
+    @Override
+    public String toString() {
+        return name;
     }
 }

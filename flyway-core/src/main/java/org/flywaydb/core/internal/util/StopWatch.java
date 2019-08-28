@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,20 +35,25 @@ public class StopWatch {
      * Starts the stop watch.
      */
     public void start() {
-        start = System.nanoTime();
+        start = nanoTime();
     }
 
     /**
      * Stops the stop watch.
      */
     public void stop() {
-        stop = System.nanoTime();
+        stop = nanoTime();
+    }
+
+    private long nanoTime() {
+        return System.nanoTime();
     }
 
     /**
      * @return The total run time in millis of the stop watch between start and stop calls.
      */
     public long getTotalTimeMillis() {
-        return TimeUnit.NANOSECONDS.toMillis(stop - start);
+        long duration = stop - start;
+        return TimeUnit.NANOSECONDS.toMillis(duration);
     }
 }

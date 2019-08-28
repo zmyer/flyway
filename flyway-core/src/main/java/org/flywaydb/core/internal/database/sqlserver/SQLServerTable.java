@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,6 +61,15 @@ public class SQLServerTable extends Table<SQLServerDatabase, SQLServerSchema> {
     @Override
     protected void doLock() throws SQLException {
         jdbcTemplate.execute("select * from " + this + " WITH (TABLOCKX)");
+    }
+
+    /**
+     * Drops system versioning for this table if it is active.
+     */
+    void dropSystemVersioningIfPresent() throws SQLException {
+        if (jdbcTemplate.queryForInt("SELECT temporal_type FROM sys.tables WHERE object_id = OBJECT_ID('" + this + "', 'U')") == 2) {
+            jdbcTemplate.execute("ALTER TABLE " + this + " SET (SYSTEM_VERSIONING = OFF)");
+        }
     }
 
     @Override

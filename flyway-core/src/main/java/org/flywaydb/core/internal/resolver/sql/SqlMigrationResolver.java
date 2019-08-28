@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,15 +22,14 @@ import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.api.resolver.Context;
 import org.flywaydb.core.api.resolver.MigrationResolver;
 import org.flywaydb.core.api.resolver.ResolvedMigration;
-import org.flywaydb.core.internal.callback.CallbackExecutor;
-import org.flywaydb.core.internal.database.base.Database;
 import org.flywaydb.core.internal.resolver.MigrationInfoHelper;
 import org.flywaydb.core.internal.resolver.ResolvedMigrationComparator;
 import org.flywaydb.core.internal.resolver.ResolvedMigrationImpl;
 import org.flywaydb.core.internal.resource.LoadableResource;
 import org.flywaydb.core.internal.resource.ResourceProvider;
 import org.flywaydb.core.internal.sqlscript.SqlScript;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilderFactory;
+import org.flywaydb.core.internal.sqlscript.SqlScriptExecutorFactory;
+import org.flywaydb.core.internal.sqlscript.SqlScriptFactory;
 import org.flywaydb.core.internal.util.Pair;
 
 import java.util.ArrayList;
@@ -46,23 +45,16 @@ import java.util.zip.CRC32;
  */
 public class SqlMigrationResolver implements MigrationResolver {
     /**
-     * Database-specific support.
+     * The SQL script executor factory.
      */
-    private final Database database;
+    private final SqlScriptExecutorFactory sqlScriptExecutorFactory;
 
     /**
      * The resource provider to use.
      */
     private final ResourceProvider resourceProvider;
 
-    private final SqlStatementBuilderFactory sqlStatementBuilderFactory;
-
-
-
-
-
-
-
+    private final SqlScriptFactory sqlScriptFactory;
 
     /**
      * The Flyway configuration.
@@ -72,23 +64,17 @@ public class SqlMigrationResolver implements MigrationResolver {
     /**
      * Creates a new instance.
      *
-     * @param database                   The database-specific support.
-     * @param resourceProvider           The Scanner for loading migrations on the classpath.
-     * @param sqlStatementBuilderFactory The SQL statement builder factory.
-     * @param configuration              The Flyway configuration.
+     * @param resourceProvider         The Scanner for loading migrations on the classpath.
+     * @param sqlScriptExecutorFactory The SQL script executor factory.
+     * @param sqlScriptFactory         The SQL script factory.
+     * @param configuration            The Flyway configuration.
      */
-    public SqlMigrationResolver(Database database, ResourceProvider resourceProvider,
-                                SqlStatementBuilderFactory sqlStatementBuilderFactory
-
-
-
-            , Configuration configuration) {
-        this.database = database;
+    public SqlMigrationResolver(ResourceProvider resourceProvider,
+                                SqlScriptExecutorFactory sqlScriptExecutorFactory, SqlScriptFactory sqlScriptFactory,
+                                Configuration configuration) {
+        this.sqlScriptExecutorFactory = sqlScriptExecutorFactory;
         this.resourceProvider = resourceProvider;
-        this.sqlStatementBuilderFactory = sqlStatementBuilderFactory;
-
-
-
+        this.sqlScriptFactory = sqlScriptFactory;
         this.configuration = configuration;
     }
 
@@ -129,15 +115,12 @@ public class SqlMigrationResolver implements MigrationResolver {
             if (isSqlCallback(filename, separator, suffixes)) {
                 continue;
             }
-            Pair<MigrationVersion, String> info =
-                    MigrationInfoHelper.extractVersionAndDescription(filename, prefix, separator, suffixes, repeatable);
 
-            ResolvedMigrationImpl migration = new ResolvedMigrationImpl();
-            migration.setVersion(info.getLeft());
-            migration.setDescription(info.getRight());
-            migration.setScript(resource.getRelativePath());
+            SqlScript sqlScript = sqlScriptFactory.createSqlScript(resource, configuration.isMixed()
 
-            SqlScript sqlScript = new SqlScript(sqlStatementBuilderFactory, resource, configuration.isMixed());
+
+
+            );
 
 
 
@@ -166,21 +149,32 @@ public class SqlMigrationResolver implements MigrationResolver {
 
 
 
-            migration.setChecksum(checksum);
-            migration.setType(
+            Pair<MigrationVersion, String> info =
+                    MigrationInfoHelper.extractVersionAndDescription(filename, prefix, separator, suffixes, repeatable);
+
+            migrations.add(new ResolvedMigrationImpl(
+                    info.getLeft(),
+                    info.getRight(),
+                    resource.getRelativePath(),
+                    checksum,
 
 
 
-                            MigrationType.SQL);
-            migration.setPhysicalLocation(resource.getAbsolutePathOnDisk());
-            migration.setExecutor(new SqlMigrationExecutor(database, sqlScript
+                            MigrationType.SQL,
+                    resource.getAbsolutePathOnDisk(),
+                    new SqlMigrationExecutor(sqlScriptExecutorFactory, sqlScript
 
 
 
-            ));
-            migrations.add(migration);
+                    )) {
+                @Override
+                public void validate() {
+                    // Do nothing by default.
+                }
+            });
         }
     }
+
 
 
 

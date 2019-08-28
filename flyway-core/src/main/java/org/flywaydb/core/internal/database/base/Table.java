@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -99,6 +99,9 @@ public abstract class Table<D extends Database, S extends Schema> extends Schema
      * Locks this table in this schema using a read/write pessimistic lock until the end of the current transaction.
      */
     public void lock() {
+        if (!exists()) {
+            return;
+        }
         try {
             LOG.debug("Locking table " + this + "...");
             doLock();

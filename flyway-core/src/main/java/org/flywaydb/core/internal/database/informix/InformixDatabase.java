@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,8 @@ package org.flywaydb.core.internal.database.informix;
 
 import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.internal.database.base.Database;
-import org.flywaydb.core.internal.placeholder.PlaceholderReplacer;
-import org.flywaydb.core.internal.resource.LoadableResource;
-import org.flywaydb.core.internal.resource.ResourceProvider;
-import org.flywaydb.core.internal.resource.StringResource;
-import org.flywaydb.core.internal.sqlscript.AbstractSqlStatementBuilderFactory;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilder;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilderFactory;
+import org.flywaydb.core.internal.database.base.Table;
+import org.flywaydb.core.internal.jdbc.JdbcConnectionFactory;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -36,14 +31,13 @@ public class InformixDatabase extends Database<InformixConnection> {
      * Creates a new instance.
      *
      * @param configuration The Flyway configuration.
-     * @param connection    The connection to use.
      */
-    public InformixDatabase(Configuration configuration, Connection connection, boolean originalAutoCommit
+    public InformixDatabase(Configuration configuration, JdbcConnectionFactory jdbcConnectionFactory
 
 
 
     ) {
-        super(configuration, connection, originalAutoCommit
+        super(configuration, jdbcConnectionFactory
 
 
 
@@ -51,17 +45,14 @@ public class InformixDatabase extends Database<InformixConnection> {
     }
 
     @Override
-    protected InformixConnection getConnection(Connection connection
-
-
-
-    ) {
-        return new InformixConnection(configuration, this, connection, originalAutoCommit
-
-
-
-        );
+    protected InformixConnection doGetConnection(Connection connection) {
+        return new InformixConnection(this, connection);
     }
+
+
+
+
+
 
     @Override
     public final void ensureSupported() {
@@ -70,17 +61,12 @@ public class InformixDatabase extends Database<InformixConnection> {
     }
 
     @Override
-    protected SqlStatementBuilderFactory createSqlStatementBuilderFactory(PlaceholderReplacer placeholderReplacer
+    public String getRawCreateScript(Table table, boolean baseline) {
+        String tablespace = configuration.getTablespace() == null
+                ? ""
+                : " IN \"" + configuration.getTablespace() + "\"";
 
-
-
-    ) {
-        return new InformixSqlStatementBuilderFactory(placeholderReplacer);
-    }
-
-    @Override
-    public LoadableResource getRawCreateScript() {
-        return new StringResource("CREATE TABLE ${table} (\n" +
+        return "CREATE TABLE " + table + " (\n" +
                 "    installed_rank INT NOT NULL,\n" +
                 "    version VARCHAR(50),\n" +
                 "    description VARCHAR(200) NOT NULL,\n" +
@@ -91,15 +77,11 @@ public class InformixDatabase extends Database<InformixConnection> {
                 "    installed_on DATETIME YEAR TO FRACTION(3) DEFAULT CURRENT YEAR TO FRACTION(3) NOT NULL,\n" +
                 "    execution_time INT NOT NULL,\n" +
                 "    success SMALLINT NOT NULL\n" +
-                ");\n" +
-                "ALTER TABLE ${table} ADD CONSTRAINT CHECK (success in (0,1)) CONSTRAINT ${table}_s;\n" +
-                "ALTER TABLE ${table} ADD CONSTRAINT PRIMARY KEY (installed_rank) CONSTRAINT ${table}_pk;\n" +
-                "CREATE INDEX ${table}_s_idx ON ${table} (success);");
-    }
-
-    @Override
-    public String getDbName() {
-        return "informix";
+                ")" + tablespace + ";\n" +
+                (baseline ? getBaselineStatement(table) + ";\n" : "") +
+                "ALTER TABLE " + table + " ADD CONSTRAINT CHECK (success in (0,1)) CONSTRAINT " + table.getName() + "_s;\n" +
+                "ALTER TABLE " + table + " ADD CONSTRAINT PRIMARY KEY (installed_rank) CONSTRAINT " + table.getName() + "_pk;\n" +
+                "CREATE INDEX " + table.getName() + "_s_idx ON " + table + " (success);";
     }
 
     @Override
@@ -119,12 +101,12 @@ public class InformixDatabase extends Database<InformixConnection> {
 
     @Override
     public String getBooleanTrue() {
-        return "t";
+        return "1";
     }
 
     @Override
     public String getBooleanFalse() {
-        return "f";
+        return "0";
     }
 
     @Override
@@ -140,16 +122,5 @@ public class InformixDatabase extends Database<InformixConnection> {
     @Override
     public boolean useSingleConnection() {
         return false;
-    }
-
-    private static class InformixSqlStatementBuilderFactory extends AbstractSqlStatementBuilderFactory {
-        InformixSqlStatementBuilderFactory(PlaceholderReplacer placeholderReplacer) {
-            super(placeholderReplacer);
-        }
-
-        @Override
-        public SqlStatementBuilder createSqlStatementBuilder() {
-            return new InformixSqlStatementBuilder();
-        }
     }
 }

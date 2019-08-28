@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ import java.util.Map;
 /**
  * PostgreSQL implementation of Schema.
  */
-public class PostgreSQLSchema extends Schema<PostgreSQLDatabase> {
+public class PostgreSQLSchema extends Schema<PostgreSQLDatabase, PostgreSQLTable> {
     /**
      * Creates a new PostgreSQL schema.
      *
@@ -239,7 +239,14 @@ public class PostgreSQLSchema extends Schema<PostgreSQLDatabase> {
     private List<String> generateDropStatementsForDomains() throws SQLException {
         List<String> domainNames =
                 jdbcTemplate.queryForStringList(
-                        "SELECT domain_name FROM information_schema.domains WHERE domain_schema=?", name);
+                        "SELECT t.typname as domain_name\n" +
+                                "FROM pg_catalog.pg_type t\n" +
+                                "       LEFT JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace\n" +
+                                "       LEFT JOIN pg_depend dep ON dep.objid = t.oid AND dep.deptype = 'e'\n" +
+                                "WHERE t.typtype = 'd'\n" +
+                                "  AND n.nspname = ?\n" +
+                                "  AND dep.objid IS NULL"
+                        , name);
 
         List<String> statements = new ArrayList<>();
         for (String domainName : domainNames) {
@@ -293,23 +300,27 @@ public class PostgreSQLSchema extends Schema<PostgreSQLDatabase> {
     }
 
     @Override
-    protected Table[] doAllTables() throws SQLException {
+    protected PostgreSQLTable[] doAllTables() throws SQLException {
         List<String> tableNames =
                 jdbcTemplate.queryForStringList(
                         //Search for all the table names
                         "SELECT t.table_name FROM information_schema.tables t" +
-                                //in this schema
+                                // that don't depend on an extension
+                                " LEFT JOIN pg_depend dep ON dep.objid = (quote_ident(t.table_schema)||'.'||quote_ident(t.table_name))::regclass::oid AND dep.deptype = 'e'" +
+                                // in this schema
                                 " WHERE table_schema=?" +
                                 //that are real tables (as opposed to views)
                                 " AND table_type='BASE TABLE'" +
-                                //and are not child tables (= do not inherit from another table).
+                                // with no extension depending on them
+                                " AND dep.objid IS NULL" +
+                                // and are not child tables (= do not inherit from another table).
                                 " AND NOT (SELECT EXISTS (SELECT inhrelid FROM pg_catalog.pg_inherits" +
                                 " WHERE inhrelid = (quote_ident(t.table_schema)||'.'||quote_ident(t.table_name))::regclass::oid))",
                         name
                 );
         //Views and child tables are excluded as they are dropped with the parent table when using cascade.
 
-        Table[] tables = new Table[tableNames.size()];
+        PostgreSQLTable[] tables = new PostgreSQLTable[tableNames.size()];
         for (int i = 0; i < tableNames.size(); i++) {
             tables[i] = new PostgreSQLTable(jdbcTemplate, database, this, tableNames.get(i));
         }

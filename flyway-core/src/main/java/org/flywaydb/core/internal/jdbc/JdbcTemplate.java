@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -48,8 +48,17 @@ public class JdbcTemplate {
      * @param connection The database connection to use.
      */
     public JdbcTemplate(Connection connection) {
+        this(connection, DatabaseType.fromJdbcConnection(connection));
+    }
+
+    /**
+     * Creates a new JdbcTemplate.
+     *
+     * @param connection The database connection to use.
+     */
+    public JdbcTemplate(Connection connection, DatabaseType databaseType) {
         this.connection = connection;
-        this.nullType = DatabaseType.fromJdbcConnection(connection).getNullType();
+        this.nullType = databaseType.getNullType();
     }
 
     /**
@@ -268,38 +277,28 @@ public class JdbcTemplate {
         // retrieve all results to ensure all errors are detected
         int updateCount = -1;
         while (hasResults || (updateCount = statement.getUpdateCount()) != -1) {
+            List<String> columns = null;
+            List<List<String>> data = null;
+            if (hasResults) {
+                try (ResultSet resultSet = statement.getResultSet()) {
+                    columns = new ArrayList<>();
+                    ResultSetMetaData metadata = resultSet.getMetaData();
+                    int columnCount = metadata.getColumnCount();
+                    for (int i = 1; i <= columnCount; i++) {
+                        columns.add(metadata.getColumnName(i));
+                    }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            results.addResult(new Result(updateCount
-
-
-
-            ));
+                    data = new ArrayList<>();
+                    while (resultSet.next()) {
+                        List<String> row = new ArrayList<>();
+                        for (int i = 1; i <= columnCount; i++) {
+                            row.add(resultSet.getString(i));
+                        }
+                        data.add(row);
+                    }
+                }
+            }
+            results.addResult(new Result(updateCount, columns, data));
             hasResults = statement.getMoreResults();
         }
     }
@@ -348,20 +347,20 @@ public class JdbcTemplate {
     /**
      * Executes this query and map the results using this row mapper.
      *
-     * @param query     The query to execute.
+     * @param sql       The query to execute.
      * @param rowMapper The row mapper to use.
      * @param <T>       The type of the result objects.
      * @return The list of results.
      * @throws SQLException when the query failed to execute.
      */
-    public <T> List<T> query(String query, RowMapper<T> rowMapper) throws SQLException {
-        Statement statement = null;
+    public <T> List<T> query(String sql, RowMapper<T> rowMapper, Object... params) throws SQLException {
+        PreparedStatement statement = null;
         ResultSet resultSet = null;
 
         List<T> results;
         try {
-            statement = connection.createStatement();
-            resultSet = statement.executeQuery(query);
+            statement = prepareStatement(sql, params);
+            resultSet = statement.executeQuery();
 
             results = new ArrayList<>();
             while (resultSet.next()) {

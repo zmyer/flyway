@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,13 +17,9 @@ package org.flywaydb.core.internal.database.redshift;
 
 import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.internal.database.base.Database;
-import org.flywaydb.core.internal.placeholder.PlaceholderReplacer;
-import org.flywaydb.core.internal.resource.ResourceProvider;
-import org.flywaydb.core.internal.sqlscript.AbstractSqlStatementBuilderFactory;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilder;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilderFactory;
+import org.flywaydb.core.internal.database.base.Table;
+import org.flywaydb.core.internal.jdbc.JdbcConnectionFactory;
 import org.flywaydb.core.internal.util.StringUtils;
-import org.flywaydb.core.internal.jdbc.JdbcTemplate;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -33,31 +29,16 @@ import java.sql.SQLException;
  */
 public class RedshiftDatabase extends Database<RedshiftConnection> {
     /**
-     * Checks whether this connection is pointing at a Redshift instance.
-     *
-     * @param connection The connection.
-     * @return {@code true} if it is, {@code false} if not.
-     */
-    public static boolean isRedshift(Connection connection) {
-        try {
-            return new JdbcTemplate(connection).queryForString("SELECT version()").contains("Redshift");
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    /**
      * Creates a new instance.
      *
      * @param configuration The Flyway configuration.
-     * @param connection    The connection to use.
      */
-    public RedshiftDatabase(Configuration configuration, Connection connection, boolean originalAutoCommit
+    public RedshiftDatabase(Configuration configuration, JdbcConnectionFactory jdbcConnectionFactory
 
 
 
     ) {
-        super(configuration, connection, originalAutoCommit
+        super(configuration, jdbcConnectionFactory
 
 
 
@@ -65,16 +46,8 @@ public class RedshiftDatabase extends Database<RedshiftConnection> {
     }
 
     @Override
-    protected RedshiftConnection getConnection(Connection connection
-
-
-
-    ) {
-        return new RedshiftConnection(configuration, this, connection, originalAutoCommit
-
-
-
-        );
+    protected RedshiftConnection doGetConnection(Connection connection) {
+        return new RedshiftConnection(this, connection);
     }
 
     @Override
@@ -83,17 +56,21 @@ public class RedshiftDatabase extends Database<RedshiftConnection> {
     }
 
     @Override
-    protected SqlStatementBuilderFactory createSqlStatementBuilderFactory(PlaceholderReplacer placeholderReplacer
-
-
-
-    ) {
-        return new RedshiftSqlStatementBuilderFactory(placeholderReplacer);
-    }
-
-    @Override
-    public String getDbName() {
-        return "redshift";
+    public String getRawCreateScript(Table table, boolean baseline) {
+        return "CREATE TABLE " + table + " (\n" +
+                "    \"installed_rank\" INT NOT NULL SORTKEY,\n" +
+                "    \"version\" VARCHAR(50),\n" +
+                "    \"description\" VARCHAR(200) NOT NULL,\n" +
+                "    \"type\" VARCHAR(20) NOT NULL,\n" +
+                "    \"script\" VARCHAR(1000) NOT NULL,\n" +
+                "    \"checksum\" INTEGER,\n" +
+                "    \"installed_by\" VARCHAR(100) NOT NULL,\n" +
+                "    \"installed_on\" TIMESTAMP NOT NULL DEFAULT getdate(),\n" +
+                "    \"execution_time\" INTEGER NOT NULL,\n" +
+                "    \"success\" BOOLEAN NOT NULL\n" +
+                ");\n" +
+                (baseline ? getBaselineStatement(table) + ";\n" : "") +
+                "ALTER TABLE " + table + " ADD CONSTRAINT \"" + table.getName() + "_pk\" PRIMARY KEY (\"installed_rank\");";
     }
 
     @Override
@@ -138,16 +115,5 @@ public class RedshiftDatabase extends Database<RedshiftConnection> {
     @Override
     public boolean useSingleConnection() {
         return false;
-    }
-
-    private static class RedshiftSqlStatementBuilderFactory extends AbstractSqlStatementBuilderFactory {
-        RedshiftSqlStatementBuilderFactory(PlaceholderReplacer placeholderReplacer) {
-            super(placeholderReplacer);
-        }
-
-        @Override
-        public SqlStatementBuilder createSqlStatementBuilder() {
-            return new RedshiftSqlStatementBuilder();
-        }
     }
 }

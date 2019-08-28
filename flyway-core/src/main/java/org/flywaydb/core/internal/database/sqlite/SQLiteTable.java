@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,7 +52,12 @@ public class SQLiteTable extends Table<SQLiteDatabase, SQLiteSchema> {
         if (undroppable) {
             LOG.debug("SQLite system table " + this + " cannot be dropped. Ignoring.");
         } else {
-            jdbcTemplate.execute("DROP TABLE " + database.quote(schema.getName(), name));
+            String dropSql = "DROP TABLE " + database.quote(schema.getName(), name);
+            if (getSchema().getForeignKeysEnabled()) {
+                // #2417: Disable foreign keys before dropping tables to avoid constraint violation errors
+                dropSql = "PRAGMA foreign_keys = OFF; " + dropSql + "; PRAGMA foreign_keys = ON";
+            }
+            jdbcTemplate.execute(dropSql);
         }
     }
 

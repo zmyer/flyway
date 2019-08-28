@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ import org.flywaydb.core.api.logging.LogFactory;
 import org.flywaydb.core.api.resolver.MigrationResolver;
 import org.flywaydb.core.internal.callback.CallbackExecutor;
 import org.flywaydb.core.internal.callback.DefaultCallbackExecutor;
+import org.flywaydb.core.internal.callback.NoopCallback;
+import org.flywaydb.core.internal.callback.NoopCallbackExecutor;
 import org.flywaydb.core.internal.callback.SqlScriptCallbackFactory;
 import org.flywaydb.core.internal.clazz.ClassProvider;
 import org.flywaydb.core.internal.clazz.NoopClassProvider;
@@ -39,18 +41,25 @@ import org.flywaydb.core.internal.command.DbValidate;
 import org.flywaydb.core.internal.database.DatabaseFactory;
 import org.flywaydb.core.internal.database.base.Database;
 import org.flywaydb.core.internal.database.base.Schema;
+import org.flywaydb.core.internal.jdbc.JdbcConnectionFactory;
 import org.flywaydb.core.internal.license.VersionPrinter;
 import org.flywaydb.core.internal.resolver.CompositeMigrationResolver;
 import org.flywaydb.core.internal.resource.NoopResourceProvider;
 import org.flywaydb.core.internal.resource.ResourceProvider;
+import org.flywaydb.core.internal.resource.StringResource;
 import org.flywaydb.core.internal.scanner.Scanner;
 import org.flywaydb.core.internal.schemahistory.SchemaHistory;
 import org.flywaydb.core.internal.schemahistory.SchemaHistoryFactory;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilderFactory;
+import org.flywaydb.core.internal.sqlscript.SqlScript;
+import org.flywaydb.core.internal.sqlscript.SqlScriptExecutorFactory;
+import org.flywaydb.core.internal.sqlscript.SqlScriptFactory;
+import org.flywaydb.core.internal.util.IOUtils;
 import org.flywaydb.core.internal.util.StringUtils;
 
+import java.sql.Connection;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -143,19 +152,17 @@ public class Flyway {
                     );
                 }
 
-                new DbSchemas(database, schemas, schemaHistory).create();
-
                 if (!schemaHistory.exists()) {
                     List<Schema> nonEmptySchemas = new ArrayList<>();
                     for (Schema schema : schemas) {
-                        if (!schema.empty()) {
+                        if (schema.exists() && !schema.empty()) {
                             nonEmptySchemas.add(schema);
                         }
                     }
 
                     if (!nonEmptySchemas.isEmpty()) {
                         if (configuration.isBaselineOnMigrate()) {
-                            doBaseline(schemaHistory, database, schemas, callbackExecutor);
+                            doBaseline(schemaHistory, callbackExecutor);
                         } else {
                             // Second check for MySQL which is sometimes flaky otherwise
                             if (!schemaHistory.exists()) {
@@ -165,6 +172,9 @@ public class Flyway {
                                         + " or set baselineOnMigrate to true to initialize the schema history table.");
                             }
                         }
+                    } else {
+                        new DbSchemas(database, schemas, schemaHistory).create(false);
+                        schemaHistory.create(false);
                     }
                 }
 
@@ -174,9 +184,8 @@ public class Flyway {
         }, true);
     }
 
-    private void doBaseline(SchemaHistory schemaHistory, Database database, Schema[] schemas, CallbackExecutor callbackExecutor) {
-        new DbBaseline(database, schemaHistory, schemas[0],
-                configuration.getBaselineVersion(), configuration.getBaselineDescription(),
+    private void doBaseline(SchemaHistory schemaHistory, CallbackExecutor callbackExecutor) {
+        new DbBaseline(schemaHistory, configuration.getBaselineVersion(), configuration.getBaselineDescription(),
                 callbackExecutor).baseline();
     }
 
@@ -322,8 +331,8 @@ public class Flyway {
 
 
             ) {
-                new DbSchemas(database, schemas, schemaHistory).create();
-                doBaseline(schemaHistory, database, schemas, callbackExecutor);
+                new DbSchemas(database, schemas, schemaHistory).create(true);
+                doBaseline(schemaHistory, callbackExecutor);
                 return null;
             }
         }, false);
@@ -356,27 +365,17 @@ public class Flyway {
     /**
      * Creates the MigrationResolver.
      *
-     * @param database                   The database-specific support.
-     * @param resourceProvider           The resource provider.
-     * @param classProvider              The class provider.
-     * @param sqlStatementBuilderFactory The SQL statement builder factory.
+     * @param resourceProvider The resource provider.
+     * @param classProvider    The class provider.
+     * @param sqlScriptFactory The SQL statement builder factory.
      * @return A new, fully configured, MigrationResolver instance.
      */
-    private MigrationResolver createMigrationResolver(Database database,
-                                                      ResourceProvider resourceProvider,
+    private MigrationResolver createMigrationResolver(ResourceProvider resourceProvider,
                                                       ClassProvider classProvider,
-                                                      SqlStatementBuilderFactory sqlStatementBuilderFactory
-
-
-
-    ) {
-        return new CompositeMigrationResolver(database,
-                resourceProvider, classProvider, configuration,
-                sqlStatementBuilderFactory
-
-
-
-                , configuration.getResolvers());
+                                                      SqlScriptExecutorFactory sqlScriptExecutorFactory,
+                                                      SqlScriptFactory sqlScriptFactory) {
+        return new CompositeMigrationResolver(resourceProvider, classProvider, configuration,
+                sqlScriptExecutorFactory, sqlScriptFactory, configuration.getResolvers());
     }
 
     /**
@@ -410,9 +409,67 @@ public class Flyway {
 
 
 
+        final ResourceProvider resourceProvider;
+        ClassProvider classProvider;
+        if (!scannerRequired && configuration.isSkipDefaultResolvers() && configuration.isSkipDefaultCallbacks()) {
+            resourceProvider = NoopResourceProvider.INSTANCE;
+            classProvider = NoopClassProvider.INSTANCE;
+        } else {
+            Scanner scanner = new Scanner(
+                    Arrays.asList(configuration.getLocations()),
+                    configuration.getClassLoader(),
+                    configuration.getEncoding()
+
+
+
+            );
+            resourceProvider = scanner;
+            classProvider = scanner;
+        }
+
+        JdbcConnectionFactory jdbcConnectionFactory = new JdbcConnectionFactory(configuration.getDataSource(),
+                configuration.getConnectRetries()
+
+
+
+
+        );
+
+        final SqlScriptFactory sqlScriptFactory =
+                DatabaseFactory.createSqlScriptFactory(jdbcConnectionFactory, configuration);
+
+        final SqlScriptExecutorFactory noCallbackSqlScriptExecutorFactory = DatabaseFactory.createSqlScriptExecutorFactory(
+                jdbcConnectionFactory
+
+
+
+
+        );
+
+        jdbcConnectionFactory.setConnectionInitializer(new JdbcConnectionFactory.ConnectionInitializer() {
+            @Override
+            public void initialize(JdbcConnectionFactory jdbcConnectionFactory, Connection connection) {
+                if (configuration.getInitSql() == null) {
+                    return;
+                }
+                StringResource resource = new StringResource(configuration.getInitSql());
+
+                SqlScript sqlScript = sqlScriptFactory.createSqlScript(resource, true
+
+
+
+                );
+                noCallbackSqlScriptExecutorFactory.createSqlScriptExecutor(connection
+
+
+
+                ).execute(sqlScript);
+            }
+        });
+
         Database database = null;
         try {
-            database = DatabaseFactory.createDatabase(configuration, !dbConnectionInfoPrinted
+            database = DatabaseFactory.createDatabase(configuration, !dbConnectionInfoPrinted, jdbcConnectionFactory
 
 
 
@@ -422,44 +479,32 @@ public class Flyway {
 
             Schema[] schemas = prepareSchemas(database);
 
-            ResourceProvider resourceProvider;
-            ClassProvider classProvider;
-            if (!scannerRequired && configuration.isSkipDefaultResolvers() && configuration.isSkipDefaultCallbacks()) {
-                resourceProvider = NoopResourceProvider.INSTANCE;
-                classProvider = NoopClassProvider.INSTANCE;
-            } else {
-                Scanner scanner = new Scanner(
-                        Arrays.asList(configuration.getLocations()),
-                        configuration.getClassLoader(),
-                        configuration.getEncoding()
 
 
 
-                );
-                resourceProvider = scanner;
-                classProvider = scanner;
-            }
-
-            SqlStatementBuilderFactory sqlStatementBuilderFactory = database.createSqlStatementBuilderFactory(
 
 
 
-            );
+            database.ensureSupported();
 
-            CallbackExecutor callbackExecutor = new DefaultCallbackExecutor(configuration, database, schemas[0],
-                    prepareCallbacks(database, resourceProvider, sqlStatementBuilderFactory
+            DefaultCallbackExecutor callbackExecutor = new DefaultCallbackExecutor(configuration, database, schemas[0],
+                    prepareCallbacks(database, resourceProvider, jdbcConnectionFactory, sqlScriptFactory
 
 
 
                     ));
 
+            SqlScriptExecutorFactory sqlScriptExecutorFactory = DatabaseFactory.createSqlScriptExecutorFactory(jdbcConnectionFactory
+
+
+
+
+            );
+
             result = command.execute(
-                    createMigrationResolver(database, resourceProvider, classProvider, sqlStatementBuilderFactory
-
-
-
-                    ),
-                    SchemaHistoryFactory.getSchemaHistory(configuration, database, schemas[0]
+                    createMigrationResolver(resourceProvider, classProvider, sqlScriptExecutorFactory, sqlScriptFactory),
+                    SchemaHistoryFactory.getSchemaHistory(configuration, noCallbackSqlScriptExecutorFactory, sqlScriptFactory,
+                            database, schemas[0]
 
 
 
@@ -472,11 +517,7 @@ public class Flyway {
 
             );
         } finally {
-            if (database != null) {
-                database.close();
-            }
-
-
+            IOUtils.close(database);
 
 
 
@@ -521,7 +562,9 @@ public class Flyway {
     }
 
     private List<Callback> prepareCallbacks(Database database, ResourceProvider resourceProvider,
-                                            SqlStatementBuilderFactory sqlStatementBuilderFactory
+                                            JdbcConnectionFactory jdbcConnectionFactory,
+                                            SqlScriptFactory sqlScriptFactory
+
 
 
 
@@ -533,18 +576,37 @@ public class Flyway {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
         effectiveCallbacks.addAll(Arrays.asList(configuration.getCallbacks()));
 
         if (!configuration.isSkipDefaultCallbacks()) {
+            SqlScriptExecutorFactory sqlScriptExecutorFactory =
+                    DatabaseFactory.createSqlScriptExecutorFactory(jdbcConnectionFactory
+
+
+
+
+                    );
+
             effectiveCallbacks.addAll(
                     new SqlScriptCallbackFactory(
-                            database,
                             resourceProvider,
-                            sqlStatementBuilderFactory,
-                            configuration).getCallbacks());
+                            sqlScriptExecutorFactory,
+                            sqlScriptFactory,
+                            configuration
+                    ).getCallbacks());
         }
-
-
 
 
 

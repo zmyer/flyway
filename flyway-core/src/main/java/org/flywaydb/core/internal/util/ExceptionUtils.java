@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -46,6 +46,20 @@ public class ExceptionUtils {
         }
 
         return cause;
+    }
+
+    /**
+     * Retrives the exact location where this exception was thrown.
+     *
+     * @param e The exception.
+     * @return The location, suitable for a debug message.
+     */
+    public static String getThrowLocation(Throwable e) {
+        StackTraceElement element = e.getStackTrace()[0];
+        int lineNumber = element.getLineNumber();
+        return element.getClassName() + "." + element.getMethodName()
+                + (lineNumber < 0 ? "" : ":" + lineNumber)
+                + (element.isNativeMethod() ? " [native]" : "");
     }
 
     /**

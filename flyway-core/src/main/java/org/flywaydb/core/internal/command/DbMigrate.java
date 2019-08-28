@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -123,8 +123,6 @@ public class DbMigrate {
         try {
             StopWatch stopWatch = new StopWatch();
             stopWatch.start();
-
-            schemaHistory.create();
 
             count = configuration.isGroup() ?
                     // When group is active, start the transaction boundary early to
@@ -355,7 +353,7 @@ public class DbMigrate {
 
             stopWatch.start();
 
-            LOG.info("Migrating " + migrationText);
+            LOG.debug("Starting migration of " + migrationText + " ...");
 
             connectionUserObjects.restoreOriginalState();
             connectionUserObjects.changeCurrentSchemaTo(schema);
@@ -364,6 +362,7 @@ public class DbMigrate {
                 callbackExecutor.setMigrationInfo(migration);
                 callbackExecutor.onEachMigrateOrUndoEvent(Event.BEFORE_EACH_MIGRATE);
                 try {
+                    LOG.info("Migrating " + migrationText);
                     migration.getResolvedMigration().getExecutor().execute(context);
                 } catch (FlywayException e) {
                     callbackExecutor.onEachMigrateOrUndoEvent(Event.AFTER_EACH_MIGRATE_ERROR);
@@ -391,8 +390,10 @@ public class DbMigrate {
         final MigrationExecutor migrationExecutor = migration.getResolvedMigration().getExecutor();
         final String migrationText;
         if (migration.getVersion() != null) {
-            migrationText = "schema " + schema + " to version " + migration.getVersion() + " - " + migration.getDescription() +
-                    (isOutOfOrder ? " [out of order]" : "") + (migrationExecutor.canExecuteInTransaction() ? "" : " [non-transactional]");
+            migrationText = "schema " + schema + " to version " + migration.getVersion()
+                    + (StringUtils.hasLength(migration.getDescription()) ? " - " + migration.getDescription() : "")
+                    + (isOutOfOrder ? " [out of order]" : "")
+                    + (migrationExecutor.canExecuteInTransaction() ? "" : " [non-transactional]");
         } else {
             migrationText = "schema " + schema + " with repeatable migration " + migration.getDescription()
                     + (migrationExecutor.canExecuteInTransaction() ? "" : " [non-transactional]");

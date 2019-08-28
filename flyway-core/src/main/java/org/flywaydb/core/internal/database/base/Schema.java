@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
  */
 package org.flywaydb.core.internal.database.base;
 
+import org.flywaydb.core.api.logging.Log;
+import org.flywaydb.core.api.logging.LogFactory;
 import org.flywaydb.core.internal.exception.FlywaySqlException;
 import org.flywaydb.core.internal.jdbc.JdbcTemplate;
 import org.flywaydb.core.internal.jdbc.JdbcUtils;
@@ -27,7 +29,9 @@ import java.util.List;
 /**
  * Represents a database schema.
  */
-public abstract class Schema<D extends Database> {
+public abstract class Schema<D extends Database, T extends Table> {
+    private static final Log LOG = LogFactory.getLog(Schema.class);
+
     /**
      * The Jdbc Template for communicating with the DB.
      */
@@ -110,6 +114,7 @@ public abstract class Schema<D extends Database> {
      */
     public void create() {
         try {
+            LOG.info("Creating schema " + this + " ...");
             doCreate();
         } catch (SQLException e) {
             throw new FlywaySqlException("Unable to create schema " + this, e);
@@ -164,7 +169,7 @@ public abstract class Schema<D extends Database> {
      *
      * @return All tables in the schema.
      */
-    public Table[] allTables() {
+    public T[] allTables() {
         try {
             return doAllTables();
         } catch (SQLException e) {
@@ -178,7 +183,7 @@ public abstract class Schema<D extends Database> {
      * @return All tables in the schema.
      * @throws SQLException when the retrieval failed.
      */
-    protected abstract Table[] doAllTables() throws SQLException;
+    protected abstract T[] doAllTables() throws SQLException;
 
     /**
      * Retrieves all the types in this schema.

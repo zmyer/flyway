@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -74,8 +74,7 @@ public class LogFactory {
      */
     public static Log getLog(Class<?> clazz) {
         if (logCreator == null) {
-            ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-            logCreator = LogCreatorFactory.getLogCreator(classLoader, fallbackLogCreator);
+            logCreator = LogCreatorFactory.getLogCreator(LogFactory.class.getClassLoader(), fallbackLogCreator);
         }
 
         return logCreator.createLogger(clazz);

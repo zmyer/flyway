@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,12 @@
  */
 package org.flywaydb.core.internal.database.mysql;
 
-import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.api.logging.Log;
 import org.flywaydb.core.api.logging.LogFactory;
 import org.flywaydb.core.internal.database.base.Connection;
 import org.flywaydb.core.internal.database.base.Schema;
 import org.flywaydb.core.internal.database.base.Table;
+import org.flywaydb.core.internal.exception.FlywaySqlException;
 import org.flywaydb.core.internal.util.StringUtils;
 
 import java.sql.SQLException;
@@ -36,26 +36,33 @@ public class MySQLConnection extends Connection<MySQLDatabase> {
 
     private static final String USER_VARIABLES_TABLE_MARIADB = "information_schema.user_variables";
     private static final String USER_VARIABLES_TABLE_MYSQL = "performance_schema.user_variables_by_thread";
+    private static final String FOREIGN_KEY_CHECKS = "foreign_key_checks";
+    private static final String SQL_SAFE_UPDATES = "sql_safe_updates";
 
     private final String userVariablesQuery;
     private final boolean canResetUserVariables;
 
-    MySQLConnection(Configuration configuration, MySQLDatabase database, java.sql.Connection connection
-            , boolean originalAutoCommit
+    private final int originalForeignKeyChecks;
+    private final int originalSqlSafeUpdates;
 
-
-
-    ) {
-        super(configuration, database, connection, originalAutoCommit
-
-
-
-        );
+    MySQLConnection(MySQLDatabase database, java.sql.Connection connection) {
+        super(database, connection);
 
         userVariablesQuery = "SELECT variable_name FROM "
                 + (database.isMariaDB() ? USER_VARIABLES_TABLE_MARIADB : USER_VARIABLES_TABLE_MYSQL)
                 + " WHERE variable_value IS NOT NULL";
         canResetUserVariables = hasUserVariableResetCapability();
+
+        originalForeignKeyChecks = getIntVariableValue(FOREIGN_KEY_CHECKS);
+        originalSqlSafeUpdates = getIntVariableValue(SQL_SAFE_UPDATES);
+    }
+
+    private int getIntVariableValue(String varName) {
+        try {
+            return jdbcTemplate.queryForInt("SELECT @@" + varName);
+        } catch (SQLException e) {
+            throw new FlywaySqlException("Unable to determine value for '" + varName + "' variable", e);
+        }
     }
 
     // #2215: ensure the database is recent enough and the current user has the necessary SELECT grant
@@ -87,6 +94,8 @@ public class MySQLConnection extends Connection<MySQLDatabase> {
     @Override
     protected void doRestoreOriginalState() throws SQLException {
         resetUserVariables();
+        jdbcTemplate.execute("SET " + FOREIGN_KEY_CHECKS + "=?, " + SQL_SAFE_UPDATES + "=?",
+                originalForeignKeyChecks, originalSqlSafeUpdates);
     }
 
     // #2197: prevent user-defined variables from leaking beyond the scope of a migration

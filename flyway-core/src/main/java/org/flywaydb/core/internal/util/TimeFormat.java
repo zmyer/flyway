@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ public class TimeFormat {
     }
 
     /**
-     * Formats this execution time.
+     * Formats this execution time as minutes:seconds.millis. Ex.: 02:15.123s
      *
      * @param millis The number of millis.
      * @return The execution in a human-readable format.

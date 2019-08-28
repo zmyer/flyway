@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ public class LogCreatorFactory {
             return ClassUtils.instantiate(ApacheCommonsLogCreator.class.getName(), classLoader);
         }
         if (fallbackLogCreator == null) {
-            return ClassUtils.instantiate(JavaUtilLogCreator.class.getName(), classLoader);
+            return new JavaUtilLogCreator();
         }
         return fallbackLogCreator;
     }

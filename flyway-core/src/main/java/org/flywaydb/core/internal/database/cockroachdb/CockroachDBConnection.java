@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package org.flywaydb.core.internal.database.cockroachdb;
 
-import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.internal.database.base.Connection;
 import org.flywaydb.core.internal.database.base.Schema;
 import org.flywaydb.core.internal.exception.FlywaySqlException;
@@ -27,17 +26,8 @@ import java.sql.SQLException;
  * CockroachDB connection.
  */
 public class CockroachDBConnection extends Connection<CockroachDBDatabase> {
-    CockroachDBConnection(Configuration configuration, CockroachDBDatabase database,
-                          java.sql.Connection connection, boolean originalAutoCommit
-
-
-
-    ) {
-        super(configuration, database, connection, originalAutoCommit
-
-
-
-        );
+    CockroachDBConnection(CockroachDBDatabase database, java.sql.Connection connection) {
+        super(database, connection);
     }
 
     @Override

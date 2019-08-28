@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,26 +16,24 @@
 package org.flywaydb.core.internal.database.db2;
 
 import org.flywaydb.core.internal.database.base.Function;
-import org.flywaydb.core.internal.jdbc.JdbcTemplate;
 import org.flywaydb.core.internal.database.base.Schema;
 import org.flywaydb.core.internal.database.base.Table;
 import org.flywaydb.core.internal.database.base.Type;
-import org.flywaydb.core.internal.util.StringUtils;
+import org.flywaydb.core.internal.jdbc.JdbcTemplate;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * DB2 implementation of Schema.
  */
-public class DB2Schema extends Schema<DB2Database> {
+public class DB2Schema extends Schema<DB2Database, DB2Table> {
     /**
      * Creates a new DB2 schema.
      *
      * @param jdbcTemplate The Jdbc Template for communicating with the DB.
-     * @param database    The database-specific support.
+     * @param database     The database-specific support.
      * @param name         The name of the schema.
      */
     DB2Schema(JdbcTemplate jdbcTemplate, DB2Database database, String name) {
@@ -44,19 +42,26 @@ public class DB2Schema extends Schema<DB2Database> {
 
     @Override
     protected boolean doExists() throws SQLException {
-        return jdbcTemplate.queryForInt("SELECT COUNT(*) FROM syscat.schemata WHERE schemaname=?", name) > 0;
+        return jdbcTemplate.queryForInt("SELECT count(*) from ("
+                + "SELECT 1 FROM syscat.schemata WHERE schemaname=?"
+                + ")", name) > 0;
     }
 
     @Override
     protected boolean doEmpty() throws SQLException {
-        int objectCount = jdbcTemplate.queryForInt("select count(*) from syscat.tables where tabschema = ?", name);
-        objectCount += jdbcTemplate.queryForInt("select count(*) from syscat.views where viewschema = ?", name);
-        objectCount += jdbcTemplate.queryForInt("select count(*) from syscat.sequences where seqschema = ?", name);
-        objectCount += jdbcTemplate.queryForInt("select count(*) from syscat.indexes where indschema = ?", name);
-        objectCount += jdbcTemplate.queryForInt("select count(*) from syscat.procedures where procschema = ?", name);
-        objectCount += jdbcTemplate.queryForInt("select count(*) from syscat.functions where funcschema = ?", name);
-        objectCount += jdbcTemplate.queryForInt("select count(*) from syscat.triggers where trigschema = ?", name);
-        return objectCount == 0;
+        return jdbcTemplate.queryForInt("select count(*) from ("
+                + "select 1 from syscat.tables where tabschema = ? "
+                + "union "
+                + "select 1 from syscat.views where viewschema = ? "
+                + "union "
+                + "select 1 from syscat.sequences where seqschema = ? "
+                + "union "
+                + "select 1 from syscat.indexes where indschema = ? "
+                + "union "
+                + "select 1 from syscat.routines where ROUTINESCHEMA = ? "
+                + "union "
+                + "select 1 from syscat.triggers where trigschema = ? "
+                + ")", name, name, name, name, name, name) == 0;
     }
 
     @Override
@@ -137,7 +142,6 @@ public class DB2Schema extends Schema<DB2Database> {
         }
     }
 
-
     /**
      * Generates DROP statements for the procedures in this schema.
      *
@@ -145,7 +149,8 @@ public class DB2Schema extends Schema<DB2Database> {
      * @throws SQLException when the statements could not be generated.
      */
     private List<String> generateDropStatementsForProcedures() throws SQLException {
-        String dropProcGenQuery = "select SPECIFICNAME from SYSCAT.PROCEDURES where PROCSCHEMA = '" + name + "'";
+        String dropProcGenQuery =
+                "select SPECIFICNAME from SYSCAT.ROUTINES where ROUTINETYPE='P' and ROUTINESCHEMA = '" + name + "'";
         return buildDropStatements("DROP SPECIFIC PROCEDURE", dropProcGenQuery);
     }
 
@@ -179,8 +184,19 @@ public class DB2Schema extends Schema<DB2Database> {
      * @throws SQLException when the statements could not be generated.
      */
     private List<String> generateDropStatementsForViews() throws SQLException {
-        String dropSeqGenQuery = "select TABNAME from SYSCAT.TABLES where TABSCHEMA = '" + name
-                + "' and TABNAME NOT LIKE '%_V' and TYPE='V'";
+        String dropSeqGenQuery = "select TABNAME from SYSCAT.TABLES where TYPE='V' AND TABSCHEMA = '" + name + "'" +
+
+
+
+
+                        // Filter out statistical view for an index with an expression-based key
+                        // See https://www.ibm.com/support/knowledgecenter/SSEPGG_10.5.0/com.ibm.db2.luw.sql.ref.doc/doc/r0001063.html
+                        " and substr(property,19,1) <> 'Y'"
+
+
+
+                ;
+
         return buildDropStatements("DROP VIEW", dropSeqGenQuery);
     }
 
@@ -228,9 +244,9 @@ public class DB2Schema extends Schema<DB2Database> {
         return dropVersioningStatements;
     }
 
-    private Table[] findTables(String sqlQuery, String... params) throws SQLException {
+    private DB2Table[] findTables(String sqlQuery, String... params) throws SQLException {
         List<String> tableNames = jdbcTemplate.queryForStringList(sqlQuery, params);
-        Table[] tables = new Table[tableNames.size()];
+        DB2Table[] tables = new DB2Table[tableNames.size()];
         for (int i = 0; i < tableNames.size(); i++) {
             tables[i] = new DB2Table(jdbcTemplate, database, this, tableNames.get(i));
         }
@@ -238,26 +254,27 @@ public class DB2Schema extends Schema<DB2Database> {
     }
 
     @Override
-    protected Table[] doAllTables() throws SQLException {
+    protected DB2Table[] doAllTables() throws SQLException {
         return findTables("select TABNAME from SYSCAT.TABLES where TYPE='T' and TABSCHEMA = ?", name);
     }
 
     @Override
     protected Function[] doAllFunctions() throws SQLException {
-        List<Map<String, String>> rows = jdbcTemplate.queryForList(
-                "select p.SPECIFICNAME, p.FUNCNAME," +
-                        " substr( xmlserialize( xmlagg( xmltext( concat( ', ', TYPENAME ) ) ) as varchar( 1024 ) ), 3 ) as PARAMS" +
-                        " from SYSCAT.FUNCTIONS f inner join SYSCAT.FUNCPARMS p on f.SPECIFICNAME = p.SPECIFICNAME" +
-                        " where f.ORIGIN = 'Q' and p.FUNCSCHEMA = ? and p.ROWTYPE = 'P'" +
-                        " group by p.SPECIFICNAME, p.FUNCNAME" +
-                        " order by p.SPECIFICNAME", name
-        );
+        List<String> functionNames = jdbcTemplate.queryForStringList(
+                "select SPECIFICNAME from SYSCAT.ROUTINES where"
+                        // Functions only
+                        + " ROUTINETYPE='F'"
+                        // That aren't system-generated or built-in
+                        + " AND ORIGIN IN ("
+                        + "'E', " // User-defined, external
+                        + "'M', " // Template function
+                        + "'Q', " // SQL-bodied
+                        + "'U')"  // User-defined, based on a source
+                        + " and ROUTINESCHEMA = ?", name);
 
         List<Function> functions = new ArrayList<>();
-        for (Map<String, String> row : rows) {
-            functions.add(getFunction(
-                    row.get("FUNCNAME"),
-                    StringUtils.tokenizeToStringArray(row.get("PARAMS"), ",")));
+        for (String functionName : functionNames) {
+            functions.add(getFunction(functionName));
         }
 
         return functions.toArray(new Function[0]);

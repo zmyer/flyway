@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package org.flywaydb.core.internal.command;
 
 import org.flywaydb.core.api.FlywayException;
 import org.flywaydb.core.api.MigrationInfo;
+import org.flywaydb.core.api.MigrationState;
 import org.flywaydb.core.api.MigrationVersion;
 import org.flywaydb.core.api.callback.Event;
 import org.flywaydb.core.api.configuration.Configuration;
@@ -31,11 +32,11 @@ import org.flywaydb.core.internal.info.MigrationInfoImpl;
 import org.flywaydb.core.internal.info.MigrationInfoServiceImpl;
 import org.flywaydb.core.internal.schemahistory.AppliedMigration;
 import org.flywaydb.core.internal.schemahistory.SchemaHistory;
-import org.flywaydb.core.internal.util.ObjectUtils;
 import org.flywaydb.core.internal.util.StopWatch;
 import org.flywaydb.core.internal.util.TimeFormat;
 import org.flywaydb.core.internal.jdbc.TransactionTemplate;
 
+import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
@@ -132,6 +133,9 @@ public class DbRepair {
                     && resolved.getVersion() != null
                     && applied != null
                     && !applied.getType().isSynthetic()
+
+
+
                     && updateNeeded(resolved, applied)) {
                 schemaHistory.update(applied, resolved);
                 repaired = true;
@@ -147,14 +151,14 @@ public class DbRepair {
     }
 
     private boolean checksumUpdateNeeded(ResolvedMigration resolved, AppliedMigration applied) {
-        return !ObjectUtils.nullSafeEquals(resolved.getChecksum(), applied.getChecksum());
+        return !Objects.equals(resolved.getChecksum(), applied.getChecksum());
     }
 
     private boolean descriptionUpdateNeeded(ResolvedMigration resolved, AppliedMigration applied) {
-        return !ObjectUtils.nullSafeEquals(resolved.getDescription(), applied.getDescription());
+        return !Objects.equals(resolved.getDescription(), applied.getDescription());
     }
 
     private boolean typeUpdateNeeded(ResolvedMigration resolved, AppliedMigration applied) {
-        return !ObjectUtils.nullSafeEquals(resolved.getType(), applied.getType());
+        return !Objects.equals(resolved.getType(), applied.getType());
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,7 +27,6 @@ import org.flywaydb.core.api.resolver.MigrationResolver;
 import org.flywaydb.core.api.resolver.ResolvedMigration;
 import org.flywaydb.core.internal.schemahistory.AppliedMigration;
 import org.flywaydb.core.internal.schemahistory.SchemaHistory;
-import org.flywaydb.core.internal.util.ObjectUtils;
 import org.flywaydb.core.internal.util.Pair;
 
 import java.util.ArrayList;
@@ -36,6 +35,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -141,8 +141,7 @@ public class MigrationInfoServiceImpl implements MigrationInfoService {
         context.future = future;
         context.target = target;
 
-        Map<Pair<MigrationVersion, Boolean>, ResolvedMigration> resolvedVersioned =
-                new TreeMap<>();
+        Map<Pair<MigrationVersion, Boolean>, ResolvedMigration> resolvedVersioned = new TreeMap<>();
         Map<String, ResolvedMigration> resolvedRepeatable = new TreeMap<>();
 
         for (ResolvedMigration resolvedMigration : resolvedMigrations) {
@@ -243,7 +242,8 @@ public class MigrationInfoServiceImpl implements MigrationInfoService {
         for (AppliedMigration appliedRepeatableMigration : appliedRepeatable) {
             ResolvedMigration resolvedMigration = resolvedRepeatable.get(appliedRepeatableMigration.getDescription());
             int latestRank = context.latestRepeatableRuns.get(appliedRepeatableMigration.getDescription());
-            if (resolvedMigration != null && appliedRepeatableMigration.getInstalledRank() == latestRank && ObjectUtils.nullSafeEquals(appliedRepeatableMigration.getChecksum(), resolvedMigration.getChecksum())) {
+            if (resolvedMigration != null && appliedRepeatableMigration.getInstalledRank() == latestRank
+                    && Objects.equals(appliedRepeatableMigration.getChecksum(), resolvedMigration.getChecksum())) {
                 pendingResolvedRepeatable.remove(resolvedMigration);
             }
             migrationInfos1.add(new MigrationInfoImpl(resolvedMigration, appliedRepeatableMigration, context, false
@@ -288,10 +288,12 @@ public class MigrationInfoServiceImpl implements MigrationInfoService {
 
 
 
+    @Override
     public MigrationInfo[] all() {
-        return migrationInfos.toArray(new MigrationInfoImpl[0]);
+        return migrationInfos.toArray(new MigrationInfo[0]);
     }
 
+    @Override
     public MigrationInfo current() {
         MigrationInfo current = null;
         for (MigrationInfoImpl migrationInfo : migrationInfos) {
@@ -325,6 +327,7 @@ public class MigrationInfoServiceImpl implements MigrationInfoService {
         return null;
     }
 
+    @Override
     public MigrationInfoImpl[] pending() {
         List<MigrationInfoImpl> pendingMigrations = new ArrayList<>();
         for (MigrationInfoImpl migrationInfo : migrationInfos) {
@@ -336,6 +339,7 @@ public class MigrationInfoServiceImpl implements MigrationInfoService {
         return pendingMigrations.toArray(new MigrationInfoImpl[0]);
     }
 
+    @Override
     public MigrationInfoImpl[] applied() {
         List<MigrationInfoImpl> appliedMigrations = new ArrayList<>();
         for (MigrationInfoImpl migrationInfo : migrationInfos) {
@@ -387,8 +391,13 @@ public class MigrationInfoServiceImpl implements MigrationInfoService {
     public MigrationInfo[] future() {
         List<MigrationInfo> futureMigrations = new ArrayList<>();
         for (MigrationInfo migrationInfo : migrationInfos) {
-            if ((migrationInfo.getState() == MigrationState.FUTURE_SUCCESS)
-                    || (migrationInfo.getState() == MigrationState.FUTURE_FAILED)) {
+            if (((migrationInfo.getState() == MigrationState.FUTURE_SUCCESS)
+                    || (migrationInfo.getState() == MigrationState.FUTURE_FAILED))
+
+
+
+
+            ) {
                 futureMigrations.add(migrationInfo);
             }
         }

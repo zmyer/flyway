@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,9 @@ package org.flywaydb.core.internal.database.h2;
 import org.flywaydb.core.api.MigrationVersion;
 import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.internal.database.base.Database;
+import org.flywaydb.core.internal.database.base.Table;
 import org.flywaydb.core.internal.exception.FlywaySqlException;
-import org.flywaydb.core.internal.placeholder.PlaceholderReplacer;
-import org.flywaydb.core.internal.resource.ResourceProvider;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilderFactory;
+import org.flywaydb.core.internal.jdbc.JdbcConnectionFactory;
 
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -39,14 +38,13 @@ public class H2Database extends Database<H2Connection> {
      * Creates a new instance.
      *
      * @param configuration The Flyway configuration.
-     * @param connection    The connection to use.
      */
-    public H2Database(Configuration configuration, Connection connection, boolean originalAutoCommit
+    public H2Database(Configuration configuration, JdbcConnectionFactory jdbcConnectionFactory
 
 
 
     ) {
-        super(configuration, connection, originalAutoCommit
+        super(configuration, jdbcConnectionFactory
 
 
 
@@ -54,16 +52,8 @@ public class H2Database extends Database<H2Connection> {
     }
 
     @Override
-    protected H2Connection getConnection(Connection connection
-
-
-
-    ) {
-        return new H2Connection(configuration, this, connection, originalAutoCommit
-
-
-
-        );
+    protected H2Connection doGetConnection(Connection connection) {
+        return new H2Connection(this, connection);
     }
 
     @Override
@@ -77,28 +67,61 @@ public class H2Database extends Database<H2Connection> {
         }
     }
 
+
+
+
+
+
+
+
     @Override
     public final void ensureSupported() {
         ensureDatabaseIsRecentEnough("1.2.137");
 
         ensureDatabaseNotOlderThanOtherwiseRecommendUpgradeToFlywayEdition("1.4", org.flywaydb.core.internal.license.Edition.ENTERPRISE);
 
-        recommendFlywayUpgradeIfNecessary("1.4.197");
-        supportsDropSchemaCascade = getVersion().isAtLeast("1.4.197");
+        recommendFlywayUpgradeIfNecessary("1.4.199");
+        supportsDropSchemaCascade = getVersion().isAtLeast("1.4.199");
     }
 
     @Override
-    protected SqlStatementBuilderFactory createSqlStatementBuilderFactory(PlaceholderReplacer placeholderReplacer
-
-
-
-    ) {
-        return new H2SqlStatementBuilderFactory(placeholderReplacer);
+    public String getRawCreateScript(Table table, boolean baseline) {
+        return "CREATE TABLE IF NOT EXISTS " + table + " (\n" +
+                "    \"installed_rank\" INT NOT NULL,\n" +
+                "    \"version\" VARCHAR(50),\n" +
+                "    \"description\" VARCHAR(200) NOT NULL,\n" +
+                "    \"type\" VARCHAR(20) NOT NULL,\n" +
+                "    \"script\" VARCHAR(1000) NOT NULL,\n" +
+                "    \"checksum\" INT,\n" +
+                "    \"installed_by\" VARCHAR(100) NOT NULL,\n" +
+                "    \"installed_on\" TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,\n" +
+                "    \"execution_time\" INT NOT NULL,\n" +
+                "    \"success\" BOOLEAN NOT NULL,\n" +
+                "    CONSTRAINT \"" + table.getName() + "_pk\" PRIMARY KEY (\"installed_rank\")\n" +
+                ")" +
+                // Add special table created marker to compensate for the inability of H2 to lock empty tables
+                " AS SELECT -1, NULL, '<< Flyway Schema History table created >>', 'TABLE', '', NULL, '', CURRENT_TIMESTAMP, 0, TRUE;\n" +
+                (baseline ? getBaselineStatement(table) + ";\n" : "") +
+                "CREATE INDEX \"" + table.getSchema().getName() + "\".\"" + table.getName() + "_s_idx\" ON " + table + " (\"success\");";
     }
 
     @Override
-    public String getDbName() {
-        return "h2";
+    public String getSelectStatement(Table table) {
+        return "SELECT " + quote("installed_rank")
+                + "," + quote("version")
+                + "," + quote("description")
+                + "," + quote("type")
+                + "," + quote("script")
+                + "," + quote("checksum")
+                + "," + quote("installed_on")
+                + "," + quote("installed_by")
+                + "," + quote("execution_time")
+                + "," + quote("success")
+                + " FROM " + table
+                // Ignore special table created marker
+                + " WHERE " + quote("type") + " != 'TABLE'"
+                + " AND " + quote("installed_rank") + " > ?"
+                + " ORDER BY " + quote("installed_rank");
     }
 
     @Override

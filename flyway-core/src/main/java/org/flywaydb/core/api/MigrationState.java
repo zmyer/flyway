@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -151,7 +151,7 @@ public enum MigrationState {
      * Creates a new MigrationState.
      *
      * @param displayName The name suitable for display to the end-user.
-     * @param resolved   Flag indicating if this migration is available on the classpath or not.
+     * @param resolved    Flag indicating if this migration is available on the classpath or not.
      * @param applied     Flag indicating if this migration has been applied or not.
      * @param failed      Flag indicating if this migration has failed when it was applied or not.
      */

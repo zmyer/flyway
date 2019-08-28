@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ import java.util.List;
 /**
  * Sybase ASE schema (database).
  */
-public class SybaseASESchema extends Schema<SybaseASEDatabase> {
+public class SybaseASESchema extends Schema<SybaseASEDatabase, SybaseASETable> {
     SybaseASESchema(JdbcTemplate jdbcTemplate, SybaseASEDatabase database, String name) {
         super(jdbcTemplate, database, name);
     }
@@ -72,11 +72,11 @@ public class SybaseASESchema extends Schema<SybaseASEDatabase> {
     }
 
     @Override
-    protected Table[] doAllTables() throws SQLException {
+    protected SybaseASETable[] doAllTables() throws SQLException {
         //Retrieving all table names
         List<String> tableNames = retrieveAllTableNames();
 
-        Table[] result = new Table[tableNames.size()];
+        SybaseASETable[] result = new SybaseASETable[tableNames.size()];
 
         for (int i = 0; i < tableNames.size(); i++) {
             String tableName = tableNames.get(i);

@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,6 +63,11 @@ public class DefaultSqlScriptExecutor implements SqlScriptExecutor {
 
 
 
+
+
+
+
+
     public DefaultSqlScriptExecutor(JdbcTemplate jdbcTemplate
 
 
@@ -70,6 +75,7 @@ public class DefaultSqlScriptExecutor implements SqlScriptExecutor {
 
     ) {
         this.jdbcTemplate = jdbcTemplate;
+
 
 
 
@@ -88,17 +94,42 @@ public class DefaultSqlScriptExecutor implements SqlScriptExecutor {
 
 
 
-        List<SqlStatement> sqlStatements = sqlScript.getSqlStatements();
-        for (int i = 0; i < sqlStatements.size(); i++) {
-            SqlStatement sqlStatement = sqlStatements.get(i);
-            String sql = sqlStatement.getSql();
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Executing "
+        try (SqlStatementIterator sqlStatementIterator = sqlScript.getSqlStatements()) {
+            while (sqlStatementIterator.hasNext()) {
+                SqlStatement sqlStatement = sqlStatementIterator.next();
 
 
 
-                        + "SQL: " + sql);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    executeStatement(jdbcTemplate, sqlScript, sqlStatement);
+
+
+
             }
+        }
 
 
 
@@ -106,26 +137,15 @@ public class DefaultSqlScriptExecutor implements SqlScriptExecutor {
 
 
 
+    }
+
+    protected void logStatementExecution(SqlStatement sqlStatement) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Executing "
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-                executeStatement(jdbcTemplate, sqlScript, sqlStatement);
-
-
-
+                    + "SQL: " + sqlStatement.getSql());
         }
     }
 
@@ -176,7 +196,8 @@ public class DefaultSqlScriptExecutor implements SqlScriptExecutor {
 
 
 
-    private void executeStatement(JdbcTemplate jdbcTemplate, SqlScript sqlScript, SqlStatement sqlStatement) {
+    protected void executeStatement(JdbcTemplate jdbcTemplate, SqlScript sqlScript, SqlStatement sqlStatement) {
+        logStatementExecution(sqlStatement);
         String sql = sqlStatement.getSql() + sqlStatement.getDelimiter();
 
 
@@ -184,7 +205,11 @@ public class DefaultSqlScriptExecutor implements SqlScriptExecutor {
 
 
 
-        Results results = sqlStatement.execute(jdbcTemplate, this);
+        Results results = sqlStatement.execute(jdbcTemplate
+
+
+
+        );
         if (results.getException() != null) {
 
 
@@ -220,22 +245,25 @@ public class DefaultSqlScriptExecutor implements SqlScriptExecutor {
                 handleUpdateCount(updateCount);
             }
 
+            if (
 
 
 
-
+                    result.getColumns() != null) {
+                outputQueryResult(result);
+            }
         }
     }
 
-
-
-
-
-
-
+    protected void outputQueryResult(Result result) {
+        LOG.info(new AsciiTable(result.getColumns(), result.getData(),
+                true, "", "No rows returned").render());
+    }
 
     private void handleUpdateCount(long updateCount) {
-        LOG.debug("Update Count: " + updateCount);
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Update Count: " + updateCount);
+        }
     }
 
     protected void handleException(Results results, SqlScript sqlScript, SqlStatement sqlStatement) {

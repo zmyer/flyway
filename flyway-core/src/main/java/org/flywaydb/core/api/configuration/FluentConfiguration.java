@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import org.flywaydb.core.api.FlywayException;
 import org.flywaydb.core.api.Location;
 import org.flywaydb.core.api.MigrationVersion;
 import org.flywaydb.core.api.callback.Callback;
+import org.flywaydb.core.api.migration.JavaMigration;
 import org.flywaydb.core.api.resolver.MigrationResolver;
 
 import javax.sql.DataSource;
@@ -94,6 +95,11 @@ public class FluentConfiguration implements Configuration {
     }
 
     @Override
+    public String getTablespace() {
+        return config.getTablespace();
+    }
+
+    @Override
     public MigrationVersion getTarget() {
         return config.getTarget();
     }
@@ -136,6 +142,11 @@ public class FluentConfiguration implements Configuration {
     @Override
     public String[] getSqlMigrationSuffixes() {
         return config.getSqlMigrationSuffixes();
+    }
+
+    @Override
+    public JavaMigration[] getJavaMigrations() {
+        return config.getJavaMigrations();
     }
 
     @Override
@@ -264,9 +275,17 @@ public class FluentConfiguration implements Configuration {
     }
 
     @Override
+    public boolean isOracleSqlplusWarn() {
+        return config.isOracleSqlplusWarn();
+    }
+
+    @Override
     public String getLicenseKey() {
         return config.getLicenseKey();
     }
+
+    @Override
+    public boolean outputQueryResults() { return config.outputQueryResults(); }
 
     /**
      * Sets the stream where to output the SQL statements of a migration dry run. {@code null} to execute the SQL statements
@@ -311,8 +330,9 @@ public class FluentConfiguration implements Configuration {
      * Rules for the built-in error handler that let you override specific SQL states and errors codes in order to force
      * specific errors or warnings to be treated as debug messages, info messages, warnings or errors.
      * <p>Each error override has the following format: {@code STATE:12345:W}.
-     * It is a 5 character SQL state, a colon, the SQL error code, a colon and finally the desired
-     * behavior that should override the initial one.</p>
+     * It is a 5 character SQL state (or * to match all SQL states), a colon,
+     * the SQL error code (or * to match all SQL error codes), a colon and finally
+     * the desired behavior that should override the initial one.</p>
      * <p>The following behaviors are accepted:</p>
      * <ul>
      * <li>{@code D} to force a debug message</li>
@@ -328,6 +348,8 @@ public class FluentConfiguration implements Configuration {
      * errors instead of warnings, the following errorOverride can be used: {@code 99999:17110:E}</p>
      * <p>Example 2: to force SQL Server PRINT messages to be displayed as info messages (without SQL state and error
      * code details) instead of warnings, the following errorOverride can be used: {@code S0001:0:I-}</p>
+     * <p>Example 3: to force all errors with SQL error code 123 to be treated as warnings instead,
+     * the following errorOverride can be used: {@code *:123:W}</p>
      * <p><i>Flyway Pro and Flyway Enterprise only</i></p>
      *
      * @param errorOverrides The ErrorOverrides or an empty array if none are defined. (default: none)
@@ -358,7 +380,14 @@ public class FluentConfiguration implements Configuration {
     }
 
     /**
-     * Whether to allow mixing transactional and non-transactional statements within the same migration.
+     * Whether to allow mixing transactional and non-transactional statements within the same migration. Enabling this
+     * automatically causes the entire affected migration to be run without a transaction.
+     *
+     * <p>Note that this is only applicable for PostgreSQL, Aurora PostgreSQL, SQL Server and SQLite which all have
+     * statements that do not run at all within a transaction.</p>
+     * <p>This is not to be confused with implicit transaction, as they occur in MySQL or Oracle, where even though a
+     * DDL statement was run within within a transaction, the database will issue an implicit commit before and after
+     * its execution.</p>
      *
      * @param mixed {@code true} if mixed migrations should be allowed. {@code false} if an error should be thrown instead. (default: {@code false})
      */
@@ -445,7 +474,7 @@ public class FluentConfiguration implements Configuration {
 
     /**
      * Whether to automatically call clean or not when a validation error occurs.
-     * <p> This is exclusively intended as a convenience for development. Even tough we
+     * <p> This is exclusively intended as a convenience for development. even though we
      * strongly recommend not to change migration scripts once they have been checked into SCM and run, this provides a
      * way of dealing with this case in a smooth manner. The database will be wiped clean automatically, ensuring that
      * the next migration will bring you back to the state checked into SCM.</p>
@@ -538,12 +567,12 @@ public class FluentConfiguration implements Configuration {
     }
 
     /**
-     * <p>Sets the name of the schema schema history table that will be used by Flyway.</p><p> By default (single-schema mode)
+     * <p>Sets the name of the schema history table that will be used by Flyway.</p><p> By default (single-schema mode)
      * the schema history table is placed in the default schema for the connection provided by the datasource. </p> <p> When
      * the <i>flyway.schemas</i> property is set (multi-schema mode), the schema history table is placed in the first schema
      * of the list. </p>
      *
-     * @param table The name of the schema schema history table that will be used by flyway. (default: flyway_schema_history)
+     * @param table The name of the schema history table that will be used by Flyway. (default: flyway_schema_history)
      */
     public FluentConfiguration table(String table) {
         config.setTable(table);
@@ -551,10 +580,26 @@ public class FluentConfiguration implements Configuration {
     }
 
     /**
-     * Sets the target version up to which Flyway should consider migrations. Migrations with a higher version number will
-     * be ignored.
+     * <p>Sets the tablespace where to create the schema history table that will be used by Flyway.</p>
+     * <p>This setting is only relevant for databases that do support the notion of tablespaces. It's value is simply
+     * ignored for all others.</p>
      *
-     * @param target The target version up to which Flyway should consider migrations. (default: the latest version)
+     * @param tablespace The tablespace where to create the schema history table that will be used by Flyway. (default: The default tablespace for the database connection)
+     */
+    public FluentConfiguration tablespace(String tablespace) {
+        config.setTablespace(tablespace);
+        return this;
+    }
+
+    /**
+     * Sets the target version up to which Flyway should consider migrations.
+     * Migrations with a higher version number will be ignored. 
+     * Special values:
+     * <ul>
+     * <li>{@code current}: designates the current version of the schema</li>
+     * <li>{@code latest}: the latest version of the schema, as defined by the migration with the highest version</li>
+     * </ul>
+     * Defaults to {@code latest}.
      */
     public FluentConfiguration target(MigrationVersion target) {
         config.setTarget(target);
@@ -563,11 +608,13 @@ public class FluentConfiguration implements Configuration {
 
     /**
      * Sets the target version up to which Flyway should consider migrations.
-     * Migrations with a higher version number will be ignored.
-     *
-     * @param target The target version up to which Flyway should consider migrations.
-     *               The special value {@code current} designates the current version of the schema. (default: the latest
-     *               version)
+     * Migrations with a higher version number will be ignored. 
+     * Special values:
+     * <ul>
+     * <li>{@code current}: designates the current version of the schema</li>
+     * <li>{@code latest}: the latest version of the schema, as defined by the migration with the highest version</li>
+     * </ul>
+     * Defaults to {@code latest}.
      */
     public FluentConfiguration target(String target) {
         config.setTargetAsString(target);
@@ -680,6 +727,19 @@ public class FluentConfiguration implements Configuration {
      */
     public FluentConfiguration sqlMigrationSuffixes(String... sqlMigrationSuffixes) {
         config.setSqlMigrationSuffixes(sqlMigrationSuffixes);
+        return this;
+    }
+
+    /**
+     * The manually added Java-based migrations. These are not Java-based migrations discovered through classpath
+     * scanning and instantiated by Flyway. Instead these are manually added instances of JavaMigration.
+     * This is particularly useful when working with a dependency injection container, where you may want the DI
+     * container to instantiate the class and wire up its dependencies for you.
+     *
+     * @param javaMigrations The manually added Java-based migrations. An empty array if none. (default: none)
+     */
+    public FluentConfiguration javaMigrations(JavaMigration... javaMigrations) {
+        config.setJavaMigrations(javaMigrations);
         return this;
     }
 
@@ -904,11 +964,26 @@ public class FluentConfiguration implements Configuration {
     }
 
     /**
-     * Flyway's license key.
+     * Whether Flyway should issue a warning instead of an error whenever it encounters an Oracle SQL*Plus statement
+     * it doesn't yet support.
      *
      * <p><i>Flyway Pro and Flyway Enterprise only</i></p>
      *
-     * @param licenseKey The license key.
+     * @param oracleSqlplusWarn {@code true} to issue a warning. {@code false} to fail fast instead. (default: {@code false})
+     */
+    public FluentConfiguration oracleSqlplusWarn(boolean oracleSqlplusWarn) {
+        config.setOracleSqlplusWarn(oracleSqlplusWarn);
+        return this;
+    }
+
+    /**
+     * Your Flyway license key (FL01...). Not yet a Flyway Pro or Enterprise Edition customer?
+     * Request your <a href="https://flywaydb.org/download/">Flyway trial license key</a>
+     * to try out Flyway Pro and Enterprise Edition features free for 30 days.
+     *
+     * <p><i>Flyway Pro and Flyway Enterprise only</i></p>
+     *
+     * @param licenseKey Your Flyway license key.
      */
     public FluentConfiguration licenseKey(String licenseKey) {
         config.setLicenseKey(licenseKey);

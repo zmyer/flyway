@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ import java.util.concurrent.Callable;
  */
 public abstract class SchemaHistory {
     /**
-     * The schema history table used by flyway.
+     * The schema history table used by Flyway.
      * Non-final due to the table name fallback mechanism. Will be made final in Flyway 6.0.
      */
     protected Table table;
@@ -50,8 +50,10 @@ public abstract class SchemaHistory {
 
     /**
      * Creates the schema history. Do nothing if it already exists.
+     *
+     * @param baseline Whether to include the creation of a baseline marker.
      */
-    public abstract void create();
+    public abstract void create(boolean baseline);
 
     /**
      * Checks whether the schema history table contains at least one non-synthetic applied migration.
@@ -64,7 +66,7 @@ public abstract class SchemaHistory {
 
 
 
-                    ) {
+            ) {
                 return true;
             }
         }
@@ -76,17 +78,6 @@ public abstract class SchemaHistory {
      * An empty list if no migration has been applied so far.
      */
     public abstract List<AppliedMigration> allAppliedMigrations();
-
-    /**
-     * Creates and initializes the Flyway schema history table.
-     *
-     * @param baselineVersion     The version to tag an existing schema with when executing baseline.
-     * @param baselineDescription The description to tag an existing schema with when executing baseline.
-     */
-    public final void addBaselineMarker(MigrationVersion baselineVersion, String baselineDescription) {
-        addAppliedMigration(baselineVersion, baselineDescription, MigrationType.BASELINE,
-                baselineDescription, null, 0, true);
-    }
 
     /**
      * Retrieves the baseline marker from the schema history table.

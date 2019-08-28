@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ public enum MigrationType {
     SCHEMA(true, false),
 
     /**
-     * Bseline migration.
+     * Baseline migration.
      */
     BASELINE(true, false),
 
@@ -51,12 +51,18 @@ public enum MigrationType {
 
     /**
      * Spring JDBC Java-based migrations.
+     *
+     * @deprecated Will be removed in Flyway 7.0. Use JDBC instead.
      */
+    @Deprecated
     SPRING_JDBC(false, false),
 
     /**
      * Undo Spring JDBC java-based migrations.
+     *
+     * @deprecated Will be removed in Flyway 7.0. Use UNDO_JDBC instead.
      */
+    @Deprecated
     UNDO_SPRING_JDBC(false, true),
 
     /**

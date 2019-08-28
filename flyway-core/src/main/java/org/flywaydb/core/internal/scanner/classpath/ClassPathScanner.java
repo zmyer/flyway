@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,16 +30,8 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.net.URLDecoder;
 import java.nio.charset.Charset;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.regex.Pattern;
@@ -98,7 +90,7 @@ public class ClassPathScanner implements ResourceAndClassScanner {
     public Collection<Class<?>> scanForClasses() {
         LOG.debug("Scanning for classes at " + location);
 
-        List<Class<?>> classes = new ArrayList<Class<?>>();
+        List<Class<?>> classes = new ArrayList<>();
 
         for (LoadableResource resource : resources) {
             if (resource.getAbsolutePath().endsWith(".class")) {
@@ -154,10 +146,15 @@ public class ClassPathScanner implements ResourceAndClassScanner {
             }
         }
 
+        // Make an additional attempt at finding resources in jar files in case the URL scanning method above didn't
+        // yield any results.
         boolean locationResolved = !locationUrls.isEmpty();
 
-        if (!locationResolved) {
-            // Make an additional attempt at finding resources in jar files
+        // Starting with Java 11, resources at the root of the classpath aren't being found using the URL scanning
+        // method above and we need to revert to Jar file walking.
+        boolean isClassPathRoot = location.isClassPath() && "".equals(location.getPath());
+
+        if (!locationResolved || isClassPathRoot) {
             if (classLoader instanceof URLClassLoader) {
                 URLClassLoader urlClassLoader = (URLClassLoader) classLoader;
                 for (URL url : urlClassLoader.getURLs()) {
@@ -173,10 +170,7 @@ public class ClassPathScanner implements ResourceAndClassScanner {
                                 // Fallback for URLs that are not valid URIs (should hardly ever happen).
                                 jarFile = new JarFile(url.getPath().substring("file:".length()));
                             }
-                        } catch (IOException e) {
-                            LOG.warn("Skipping unloadable jar file: " + url + " (" + e.getMessage() + ")");
-                            continue;
-                        } catch (SecurityException e) {
+                        } catch (IOException | SecurityException e) {
                             LOG.warn("Skipping unloadable jar file: " + url + " (" + e.getMessage() + ")");
                             continue;
                         }
@@ -235,7 +229,7 @@ public class ClassPathScanner implements ResourceAndClassScanner {
                 }
                 while (urls.hasMoreElements()) {
                     URL url = urls.nextElement();
-                    locationUrls.add(new URL(URLDecoder.decode(url.toExternalForm(), "UTF-8").replace("/flyway.location", "")));
+                    locationUrls.add(new URL(UrlUtils.decodeURL(url.toExternalForm()).replace("/flyway.location", "")));
                 }
             } catch (IOException e) {
                 LOG.warn("Unable to resolve location " + location + " (ClassLoader: " + classLoader + ")"

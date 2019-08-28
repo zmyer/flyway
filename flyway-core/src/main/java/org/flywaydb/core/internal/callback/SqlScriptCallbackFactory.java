@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,12 +22,11 @@ import org.flywaydb.core.api.callback.Event;
 import org.flywaydb.core.api.configuration.Configuration;
 import org.flywaydb.core.api.logging.Log;
 import org.flywaydb.core.api.logging.LogFactory;
-import org.flywaydb.core.internal.database.base.Database;
-import org.flywaydb.core.internal.jdbc.JdbcTemplate;
 import org.flywaydb.core.internal.resource.LoadableResource;
 import org.flywaydb.core.internal.resource.ResourceProvider;
 import org.flywaydb.core.internal.sqlscript.SqlScript;
-import org.flywaydb.core.internal.sqlscript.SqlStatementBuilderFactory;
+import org.flywaydb.core.internal.sqlscript.SqlScriptExecutorFactory;
+import org.flywaydb.core.internal.sqlscript.SqlScriptFactory;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -47,13 +46,13 @@ public class SqlScriptCallbackFactory {
     /**
      * Creates a new instance.
      *
-     * @param database                   The database-specific support.
-     * @param resourceProvider           The resource provider.
-     * @param sqlStatementBuilderFactory The SQL statement factory.
-     * @param configuration              The Flyway configuration.
+     * @param resourceProvider The resource provider.
+     * @param sqlScriptFactory The SQL statement factory.
+     * @param configuration    The Flyway configuration.
      */
-    public SqlScriptCallbackFactory(Database database, ResourceProvider resourceProvider,
-                                    SqlStatementBuilderFactory sqlStatementBuilderFactory,
+    public SqlScriptCallbackFactory(ResourceProvider resourceProvider,
+                                    SqlScriptExecutorFactory sqlScriptExecutorFactory,
+                                    SqlScriptFactory sqlScriptFactory,
                                     Configuration configuration) {
         Map<String, SqlScript> callbacksFound = new HashMap<>();
 
@@ -80,9 +79,13 @@ public class SqlScriptCallbackFactory {
                             "-> " + existing.getResource().getAbsolutePathOnDisk() + "\n" +
                             "-> " + resource.getAbsolutePathOnDisk());
                 }
-                SqlScript sqlScript = new SqlScript(sqlStatementBuilderFactory, resource, configuration.isMixed());
+                SqlScript sqlScript = sqlScriptFactory.createSqlScript(resource, configuration.isMixed()
+
+
+
+                );
                 callbacksFound.put(name, sqlScript);
-                callbacks.add(new SqlScriptCallback(event, description, database, sqlScript
+                callbacks.add(new SqlScriptCallback(event, description, sqlScriptExecutorFactory, sqlScript
 
 
 
@@ -108,20 +111,20 @@ public class SqlScriptCallbackFactory {
     private static class SqlScriptCallback implements Callback, Comparable<SqlScriptCallback> {
         private final Event event;
         private final String description;
-        private final Database database;
+        private final SqlScriptExecutorFactory sqlScriptExecutorFactory;
         private final SqlScript sqlScript;
 
 
 
 
-        private SqlScriptCallback(Event event, String description, Database database, SqlScript sqlScript
+        private SqlScriptCallback(Event event, String description, SqlScriptExecutorFactory sqlScriptExecutorFactory, SqlScript sqlScript
 
 
 
         ) {
             this.event = event;
             this.description = description;
-            this.database = database;
+            this.sqlScriptExecutorFactory = sqlScriptExecutorFactory;
             this.sqlScript = sqlScript;
 
 
@@ -143,7 +146,7 @@ public class SqlScriptCallbackFactory {
             LOG.info("Executing SQL callback: " + event.getId()
                     + (description == null ? "" : " - " + description)
                     + (sqlScript.executeInTransaction() ? "" : " [non-transactional]"));
-            database.createSqlScriptExecutor(new JdbcTemplate(context.getConnection())
+            sqlScriptExecutorFactory.createSqlScriptExecutor(context.getConnection()
 
 
 

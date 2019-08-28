@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,21 +24,20 @@ import org.flywaydb.core.api.logging.Log;
 import org.flywaydb.core.api.logging.LogFactory;
 import org.flywaydb.core.internal.configuration.ConfigUtils;
 import org.flywaydb.core.internal.info.MigrationInfoDumper;
+import org.flywaydb.core.internal.license.VersionPrinter;
+import org.flywaydb.commandline.ConsoleLog.Level;
 import org.flywaydb.core.internal.util.ClassUtils;
 import org.flywaydb.core.internal.util.StringUtils;
-import org.flywaydb.core.internal.license.VersionPrinter;
-import org.flywaydb.core.internal.logging.console.ConsoleLog.Level;
-import org.flywaydb.core.internal.logging.console.ConsoleLogCreator;
 
 import java.io.Console;
 import java.io.File;
 import java.io.FilenameFilter;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 
 /**
  * Main class and central entry point of the Flyway command-line tool.
@@ -85,24 +84,28 @@ public class Main {
 
             Map<String, String> envVars = ConfigUtils.environmentVariablesToPropertyMap();
 
-            Properties properties = new Properties();
-            initializeDefaults(properties);
-            loadConfigurationFromConfigFiles(properties, args, envVars);
-            properties.putAll(envVars);
-            overrideConfigurationWithArgs(properties, args);
+            Map<String, String> config = new HashMap<>();
+            initializeDefaults(config);
+            loadConfigurationFromConfigFiles(config, args, envVars);
+            config.putAll(envVars);
+            overrideConfigurationWithArgs(config, args);
 
             if (!isSuppressPrompt(args)) {
-                promptForCredentialsIfMissing(properties);
+                promptForCredentialsIfMissing(config);
             }
 
-            dumpConfiguration(properties);
+            ConfigUtils.dumpConfiguration(config);
 
             ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
-            classLoader = loadJdbcDrivers(classLoader);
-            classLoader = loadJavaMigrationsFromJarDirs(classLoader, properties);
+            List<File> jarFiles = new ArrayList<>();
+            jarFiles.addAll(getJdbcDriverJarFiles());
+            jarFiles.addAll(getJavaMigrationJarFiles(config));
+            if (!jarFiles.isEmpty()) {
+                classLoader = ClassUtils.addJarsOrDirectoriesToClasspath(classLoader, jarFiles);
+            }
 
-            filterProperties(properties);
-            Flyway flyway = Flyway.configure(classLoader).configuration(properties).load();
+            filterProperties(config);
+            Flyway flyway = Flyway.configure(classLoader).configuration(config).load();
 
             for (String operation : operations) {
                 executeOperation(flyway, operation);
@@ -167,7 +170,9 @@ public class Main {
             MigrationInfoService info = flyway.info();
             MigrationInfo current = info.current();
             MigrationVersion currentSchemaVersion = current == null ? MigrationVersion.EMPTY : current.getVersion();
-            LOG.info("Schema version: " + currentSchemaVersion);
+            MigrationVersion schemaVersionToOutput = currentSchemaVersion == null ? MigrationVersion.EMPTY : currentSchemaVersion;
+
+            LOG.info("Schema version: " + schemaVersionToOutput);
             LOG.info("");
             LOG.info(MigrationInfoDumper.dumpToAsciiTable(info.all()));
         } else if ("repair".equals(operation)) {
@@ -198,24 +203,24 @@ public class Main {
     }
 
     /**
-     * Initializes the properties with the default configuration for the command-line tool.
+     * Initializes the config with the default configuration for the command-line tool.
      *
-     * @param properties The properties object to initialize.
+     * @param config The config object to initialize.
      */
-    private static void initializeDefaults(Properties properties) {
-        properties.put(ConfigUtils.LOCATIONS, "filesystem:" + new File(getInstallationDir(), "sql").getAbsolutePath());
-        properties.put(ConfigUtils.JAR_DIRS, new File(getInstallationDir(), "jars").getAbsolutePath());
+    private static void initializeDefaults(Map<String, String> config) {
+        config.put(ConfigUtils.LOCATIONS, "filesystem:" + new File(getInstallationDir(), "sql").getAbsolutePath());
+        config.put(ConfigUtils.JAR_DIRS, new File(getInstallationDir(), "jars").getAbsolutePath());
     }
 
     /**
      * Filters there properties to remove the Flyway Commandline-specific ones.
      *
-     * @param properties The properties to filter.
+     * @param config The properties to filter.
      */
-    private static void filterProperties(Properties properties) {
-        properties.remove(ConfigUtils.JAR_DIRS);
-        properties.remove(ConfigUtils.CONFIG_FILES);
-        properties.remove(ConfigUtils.CONFIG_FILE_ENCODING);
+    private static void filterProperties(Map<String, String> config) {
+        config.remove(ConfigUtils.JAR_DIRS);
+        config.remove(ConfigUtils.CONFIG_FILES);
+        config.remove(ConfigUtils.CONFIG_FILE_ENCODING);
     }
 
     /**
@@ -319,13 +324,11 @@ public class Main {
     }
 
     /**
-     * Loads all the driver jars contained in the drivers folder. (For Jdbc drivers)
+     * Gets the jar files of all the JDBC drivers contained in the drivers folder.
      *
-     * @param classLoader The current ClassLoader.
-     * @return The new ClassLoader containing the additional driver jars.
-     * @throws IOException When the jars could not be loaded.
+     * @return The jar files.
      */
-    private static ClassLoader loadJdbcDrivers(ClassLoader classLoader) throws IOException {
+    private static List<File> getJdbcDriverJarFiles() {
         File driversDir = new File(getInstallationDir(), "drivers");
         File[] files = driversDir.listFiles(new FilenameFilter() {
             public boolean accept(File dir, String name) {
@@ -336,33 +339,28 @@ public class Main {
         // see javadoc of listFiles(): null if given path is not a real directory
         if (files == null) {
             LOG.debug("Directory for Jdbc Drivers not found: " + driversDir.getAbsolutePath());
-            return classLoader;
+            return Collections.emptyList();
         }
 
-        for (File file : files) {
-            classLoader = ClassUtils.addJarOrDirectoryToClasspath(classLoader, file.getPath());
-        }
-
-        return classLoader;
+        return Arrays.asList(files);
     }
 
     /**
-     * Loads all the jars contained in the jars folder. (For Java Migrations)
+     * Gets all the jar files contained in the jars folder. (For Java Migrations)
      *
-     * @param classLoader The current ClassLoader.
-     * @param properties  The configured properties.
-     * @return The new ClassLoader containing the additional jars.
-     * @throws IOException When the jars could not be loaded.
+     * @param config      The configured properties.
+     * @return The jar files.
      */
-    private static ClassLoader loadJavaMigrationsFromJarDirs(ClassLoader classLoader, Properties properties) throws IOException {
-        String jarDirs = properties.getProperty(ConfigUtils.JAR_DIRS);
+    private static List<File> getJavaMigrationJarFiles(Map<String, String> config) {
+        String jarDirs = config.get(ConfigUtils.JAR_DIRS);
         if (!StringUtils.hasLength(jarDirs)) {
-            return classLoader;
+            return Collections.emptyList();
         }
 
         jarDirs = jarDirs.replace(File.pathSeparator, ",");
         String[] dirs = StringUtils.tokenizeToStringArray(jarDirs, ",");
 
+        List<File> jarFiles = new ArrayList<>();
         for (String dirName : dirs) {
             File dir = new File(dirName);
             File[] files = dir.listFiles(new FilenameFilter() {
@@ -377,31 +375,29 @@ public class Main {
                 System.exit(1);
             }
 
-            for (File file : files) {
-                classLoader = ClassUtils.addJarOrDirectoryToClasspath(classLoader, file.getPath());
-            }
+            jarFiles.addAll(Arrays.asList(files));
         }
 
-        return classLoader;
+        return jarFiles;
     }
 
     /**
      * Loads the configuration from the various possible locations.
      *
-     * @param properties The properties object to load to configuration into.
-     * @param args       The command-line arguments passed in.
-     * @param envVars    The environment variables, converted into properties.
+     * @param config  The properties object to load to configuration into.
+     * @param args    The command-line arguments passed in.
+     * @param envVars The environment variables, converted into properties.
      */
     /* private -> for testing */
-    static void loadConfigurationFromConfigFiles(Properties properties, String[] args, Map<String, String> envVars) {
+    static void loadConfigurationFromConfigFiles(Map<String, String> config, String[] args, Map<String, String> envVars) {
         String encoding = determineConfigurationFileEncoding(args, envVars);
 
-        properties.putAll(ConfigUtils.loadConfigurationFile(new File(getInstallationDir() + "/conf/" + ConfigUtils.CONFIG_FILE_NAME), encoding, false));
-        properties.putAll(ConfigUtils.loadConfigurationFile(new File(System.getProperty("user.home") + "/" + ConfigUtils.CONFIG_FILE_NAME), encoding, false));
-        properties.putAll(ConfigUtils.loadConfigurationFile(new File(ConfigUtils.CONFIG_FILE_NAME), encoding, false));
+        config.putAll(ConfigUtils.loadConfigurationFile(new File(getInstallationDir() + "/conf/" + ConfigUtils.CONFIG_FILE_NAME), encoding, false));
+        config.putAll(ConfigUtils.loadConfigurationFile(new File(System.getProperty("user.home") + "/" + ConfigUtils.CONFIG_FILE_NAME), encoding, false));
+        config.putAll(ConfigUtils.loadConfigurationFile(new File(ConfigUtils.CONFIG_FILE_NAME), encoding, false));
 
         for (File configFile : determineConfigFilesFromArgs(args, envVars)) {
-            properties.putAll(ConfigUtils.loadConfigurationFile(configFile, encoding, true));
+            config.putAll(ConfigUtils.loadConfigurationFile(configFile, encoding, true));
         }
     }
 
@@ -409,41 +405,27 @@ public class Main {
      * If no user or password has been provided, prompt for it. If you want to avoid the prompt,
      * pass in an empty user or password.
      *
-     * @param properties The properties object to load to configuration into.
+     * @param config The properties object to load to configuration into.
      */
-    private static void promptForCredentialsIfMissing(Properties properties) {
+    private static void promptForCredentialsIfMissing(Map<String, String> config) {
         Console console = System.console();
         if (console == null) {
             // We are running in an automated build. Prompting is not possible.
             return;
         }
 
-        if (!properties.containsKey(ConfigUtils.URL)) {
+        if (!config.containsKey(ConfigUtils.URL)) {
             // URL is not set. We are doomed for failure anyway.
             return;
         }
 
-        if (!properties.containsKey(ConfigUtils.USER)) {
-            properties.put(ConfigUtils.USER, console.readLine("Database user: "));
+        if (!config.containsKey(ConfigUtils.USER)) {
+            config.put(ConfigUtils.USER, console.readLine("Database user: "));
         }
 
-        if (!properties.containsKey(ConfigUtils.PASSWORD)) {
+        if (!config.containsKey(ConfigUtils.PASSWORD)) {
             char[] password = console.readPassword("Database password: ");
-            properties.put(ConfigUtils.PASSWORD, password == null ? "" : String.valueOf(password));
-        }
-    }
-
-    /**
-     * Dumps the configuration to the console when debug output is activated.
-     *
-     * @param properties The configured properties.
-     */
-    private static void dumpConfiguration(Properties properties) {
-        LOG.debug("Using configuration:");
-        for (Map.Entry<Object, Object> entry : properties.entrySet()) {
-            String value = entry.getValue().toString();
-            value = ConfigUtils.PASSWORD.equals(entry.getKey()) ? StringUtils.trimOrPad("", value.length(), '*') : value;
-            LOG.debug(entry.getKey() + " -> " + value);
+            config.put(ConfigUtils.PASSWORD, password == null ? "" : String.valueOf(password));
         }
     }
 
@@ -512,14 +494,14 @@ public class Main {
     /**
      * Overrides the configuration from the config file with the properties passed in directly from the command-line.
      *
-     * @param properties The properties to override.
-     * @param args       The command-line arguments that were passed in.
+     * @param config The properties to override.
+     * @param args   The command-line arguments that were passed in.
      */
     /* private -> for testing*/
-    static void overrideConfigurationWithArgs(Properties properties, String[] args) {
+    static void overrideConfigurationWithArgs(Map<String, String> config, String[] args) {
         for (String arg : args) {
             if (isPropertyArgument(arg)) {
-                properties.put(getArgumentProperty(arg), getArgumentValue(arg));
+                config.put(getArgumentProperty(arg), getArgumentValue(arg));
             }
         }
     }

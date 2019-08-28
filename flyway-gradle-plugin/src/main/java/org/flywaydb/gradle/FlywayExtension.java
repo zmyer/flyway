@@ -1,5 +1,5 @@
 /*
- * Copyright 2010-2018 Boxfuse GmbH
+ * Copyright 2010-2019 Boxfuse GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,13 +58,21 @@ public class FlywayExtension {
     public String initSql;
 
     /**
-     * <p>The name of the schema schema history table that will be used by Flyway. (default: flyway_schema_history)</p><p> By default
+     * <p>The name of the schema history table that will be used by Flyway. (default: flyway_schema_history)</p><p> By default
      * (single-schema mode) the schema history table is placed in the default schema for the connection provided by the
      * datasource. </p> <p> When the <i>flyway.schemas</i> property is set (multi-schema mode), the schema history table is
      * placed in the first schema of the list. </p>
      * <p>Also configurable with Gradle or System Property: ${flyway.table}</p>
      */
     public String table;
+
+    /**
+     * <p>The tablespace where to create the schema history table that will be used by Flyway.</p>
+     * <p>This setting is only relevant for databases that do support the notion of tablespaces. It's value is simply
+     * ignored for all others.</p> (default: The default tablespace for the database connection)
+     * <p>Also configurable with Gradle or System Property: ${flyway.tablespace}</p>
+     */
+    public String tablespace;
 
     /**
      * The schemas managed by Flyway. These schema names are case-sensitive. (default: The default schema for the database connection)
@@ -185,8 +193,13 @@ public class FlywayExtension {
 
     /**
      * The target version up to which Flyway should consider migrations.
-     * Migrations with a higher version number will be ignored.
-     * The special value {@code current} designates the current version of the schema.
+     * Migrations with a higher version number will be ignored. 
+     * Special values:
+     * <ul>
+     * <li>{@code current}: designates the current version of the schema</li>
+     * <li>{@code latest}: the latest version of the schema, as defined by the migration with the highest version</li>
+     * </ul>
+     * Defaults to {@code latest}.
      */
     public String target;
 
@@ -207,12 +220,25 @@ public class FlywayExtension {
     public Boolean outOfOrder;
 
     /**
+     * Whether Flyway should output a table with the results of queries when executing migrations (default: true).
+     * <p><i>Flyway Pro and Flyway Enterprise only</i></p>
+     * <p>Also configurable with Gradle or System Property: ${flyway.outputQueryResults}</p>
+     */
+    public Boolean outputQueryResults;
+
+    /**
      * Whether to automatically call validate or not when running migrate. (default: true)
      */
     public Boolean validateOnMigrate;
 
     /**
-     * Whether to automatically call clean or not when a validation error occurs
+     * Whether to automatically call clean or not when a validation error occurs. (default: {@code false})<br>
+     * <p> This is exclusively intended as a convenience for development. even though we
+     * strongly recommend not to change migration scripts once they have been checked into SCM and run, this provides a
+     * way of dealing with this case in a smooth manner. The database will be wiped clean automatically, ensuring that
+     * the next migration will bring you back to the state checked into SCM.</p>
+     * <p><b>Warning ! Do not enable in production !</b></p><br>
+     * <p>Also configurable with Gradle or System Property: ${flyway.cleanOnValidationError}</p>
      */
     public Boolean cleanOnValidationError;
 
@@ -287,7 +313,14 @@ public class FlywayExtension {
     public Boolean baselineOnMigrate;
 
     /**
-     * Whether to allow mixing transactional and non-transactional statements within the same migration.
+     * Whether to allow mixing transactional and non-transactional statements within the same migration. Enabling this
+     * automatically causes the entire affected migration to be run without a transaction.
+     *
+     * <p>Note that this is only applicable for PostgreSQL, Aurora PostgreSQL, SQL Server and SQLite which all have
+     * statements that do not run at all within a transaction.</p>
+     * <p>This is not to be confused with implicit transaction, as they occur in MySQL or Oracle, where even though a
+     * DDL statement was run within within a transaction, the database will issue an implicit commit before and after
+     * its execution.</p>
      * <p>{@code true} if mixed migrations should be allowed. {@code false} if an error should be thrown instead. (default: {@code false})</p>
      */
     public Boolean mixed;
@@ -315,8 +348,9 @@ public class FlywayExtension {
      * Rules for the built-in error handler that let you override specific SQL states and errors codes in order to force
      * specific errors or warnings to be treated as debug messages, info messages, warnings or errors.
      * <p>Each error override has the following format: {@code STATE:12345:W}.
-     * It is a 5 character SQL state, a colon, the SQL error code, a colon and finally the desired
-     * behavior that should override the initial one.</p>
+     * It is a 5 character SQL state (or * to match all SQL states), a colon,
+     * the SQL error code (or * to match all SQL error codes), a colon and finally
+     * the desired behavior that should override the initial one.</p>
      * <p>The following behaviors are accepted:</p>
      * <ul>
      * <li>{@code D} to force a debug message</li>
@@ -332,6 +366,8 @@ public class FlywayExtension {
      * errors instead of warnings, the following errorOverride can be used: {@code 99999:17110:E}</p>
      * <p>Example 2: to force SQL Server PRINT messages to be displayed as info messages (without SQL state and error
      * code details) instead of warnings, the following errorOverride can be used: {@code S0001:0:I-}</p>
+     * <p>Example 3: to force all errors with SQL error code 123 to be treated as warnings instead,
+     * the following errorOverride can be used: {@code *:123:W}</p>
      * <p>Also configurable with Gradle or System Property: ${flyway.errorOverrides}</p>
      * <p><i>Flyway Pro and Flyway Enterprise only</i></p>
      */
@@ -377,7 +413,17 @@ public class FlywayExtension {
     public Boolean oracleSqlplus;
 
     /**
-     * Flyway's license key.
+     * Whether Flyway should issue a warning instead of an error whenever it encounters an Oracle SQL*Plus statement
+     * it doesn't yet support. (default: {@code false})
+     * <p>Also configurable with Gradle or System Property: ${flyway.oracle.sqlplusWarn}</p>
+     * <p><i>Flyway Pro and Flyway Enterprise only</i></p>
+     */
+    public Boolean oracleSqlplusWarn;
+
+    /**
+     * Your Flyway license key (FL01...). Not yet a Flyway Pro or Enterprise Edition customer?
+     * Request your <a href="https://flywaydb.org/download/">Flyway trial license key</a>
+     * to try out Flyway Pro and Enterprise Edition features free for 30 days.
      * <p>Also configurable with Gradle or System Property: ${flyway.licenseKey}</p>
      * <p><i>Flyway Pro and Flyway Enterprise only</i></p>
      */
